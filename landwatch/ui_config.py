@@ -69,7 +69,7 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "appraisal_price": {"min": 0, "max": 0},
     "land_area_m2": {"min": 330, "max": 3300},
     "appraisal_discount_percent": {"min": 20, "max": 90},
-    "auction_within_days": 90,
+    "auction_within_days": 14,
     "include_keywords": [],
     "exclude_keywords": [
         "지분", "법정지상권", "분묘기지권", "맹지", "유치권",
@@ -110,6 +110,7 @@ def ensure_config_defaults(cfg: dict[str, Any] | None) -> dict[str, Any]:
         "municipality_auto_max_pages": 30,
         "province_fanout_max_municipalities": 8,
         "sale_window_days": 13,
+        "search_mode": "fast",
         "adaptive_warmup": True,
         "warmup_settle_seconds": 0.75,
         "legacy_code_fallback_only": True,

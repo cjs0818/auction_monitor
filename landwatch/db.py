@@ -39,9 +39,38 @@ CREATE TABLE IF NOT EXISTS runs (
   found_count INTEGER DEFAULT 0,
   new_count INTEGER DEFAULT 0,
   changed_count INTEGER DEFAULT 0,
-  message TEXT DEFAULT ''
+  message TEXT DEFAULT '',
+  court_request_count INTEGER DEFAULT 0,
+  public_sale_request_count INTEGER DEFAULT 0,
+  cache_hit_count INTEGER DEFAULT 0,
+  throttle_wait_seconds REAL DEFAULT 0,
+  server_response_seconds REAL DEFAULT 0,
+  browser_warmup_seconds REAL DEFAULT 0,
+  detail_photo_seconds REAL DEFAULT 0,
+  court_photo_cache_count INTEGER DEFAULT 0,
+  court_photo_new_count INTEGER DEFAULT 0,
+  court_photo_failure_count INTEGER DEFAULT 0,
+  court_price_detail_success_count INTEGER DEFAULT 0,
+  court_price_detail_skipped_count INTEGER DEFAULT 0,
+  court_price_detail_failure_count INTEGER DEFAULT 0
 );
 """
+
+RUN_PERF_COLUMNS = {
+    "court_request_count": "INTEGER DEFAULT 0",
+    "public_sale_request_count": "INTEGER DEFAULT 0",
+    "cache_hit_count": "INTEGER DEFAULT 0",
+    "throttle_wait_seconds": "REAL DEFAULT 0",
+    "server_response_seconds": "REAL DEFAULT 0",
+    "browser_warmup_seconds": "REAL DEFAULT 0",
+    "detail_photo_seconds": "REAL DEFAULT 0",
+    "court_photo_cache_count": "INTEGER DEFAULT 0",
+    "court_photo_new_count": "INTEGER DEFAULT 0",
+    "court_photo_failure_count": "INTEGER DEFAULT 0",
+    "court_price_detail_success_count": "INTEGER DEFAULT 0",
+    "court_price_detail_skipped_count": "INTEGER DEFAULT 0",
+    "court_price_detail_failure_count": "INTEGER DEFAULT 0",
+}
 
 
 class Database:
@@ -51,8 +80,17 @@ class Database:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._ensure_run_perf_columns()
         self.conn.commit()
         self._remove_legacy_onbid_round_duplicates()
+
+    def _ensure_run_perf_columns(self) -> None:
+        existing = {
+            str(row["name"]) for row in self.conn.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        for column, ddl in RUN_PERF_COLUMNS.items():
+            if column not in existing:
+                self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column} {ddl}")
 
     @staticmethod
     def _stored_onbid_rank(payload: dict, today: date | None = None) -> tuple:
@@ -138,10 +176,51 @@ class Database:
         self.conn.commit()
         return int(cur.lastrowid)
 
-    def finish_run(self, run_id: int, *, status: str, found: int, new: int, changed: int, message: str = "") -> None:
+    def finish_run(
+        self,
+        run_id: int,
+        *,
+        status: str,
+        found: int,
+        new: int,
+        changed: int,
+        message: str = "",
+        metrics: dict | None = None,
+    ) -> None:
+        metrics = metrics or {}
         self.conn.execute(
-            "UPDATE runs SET finished_at=?, status=?, found_count=?, new_count=?, changed_count=?, message=? WHERE id=?",
-            (datetime.now().isoformat(timespec="seconds"), status, found, new, changed, message, run_id),
+            """
+            UPDATE runs SET
+              finished_at=?, status=?, found_count=?, new_count=?, changed_count=?, message=?,
+              court_request_count=?, public_sale_request_count=?, cache_hit_count=?,
+              throttle_wait_seconds=?, server_response_seconds=?, browser_warmup_seconds=?,
+              detail_photo_seconds=?, court_photo_cache_count=?, court_photo_new_count=?,
+              court_photo_failure_count=?, court_price_detail_success_count=?,
+              court_price_detail_skipped_count=?, court_price_detail_failure_count=?
+            WHERE id=?
+            """,
+            (
+                datetime.now().isoformat(timespec="seconds"),
+                status,
+                found,
+                new,
+                changed,
+                message,
+                int(metrics.get("court_request_count", 0) or 0),
+                int(metrics.get("public_sale_request_count", 0) or 0),
+                int(metrics.get("cache_hit_count", 0) or 0),
+                float(metrics.get("throttle_wait_seconds", 0) or 0),
+                float(metrics.get("server_response_seconds", 0) or 0),
+                float(metrics.get("browser_warmup_seconds", 0) or 0),
+                float(metrics.get("detail_photo_seconds", 0) or 0),
+                int(metrics.get("court_photo_cache_count", 0) or 0),
+                int(metrics.get("court_photo_new_count", 0) or 0),
+                int(metrics.get("court_photo_failure_count", 0) or 0),
+                int(metrics.get("court_price_detail_success_count", 0) or 0),
+                int(metrics.get("court_price_detail_skipped_count", 0) or 0),
+                int(metrics.get("court_price_detail_failure_count", 0) or 0),
+                run_id,
+            ),
         )
         self.conn.commit()
 

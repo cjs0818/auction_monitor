@@ -718,13 +718,13 @@ def build_sale_date_windows(
     """
     cfg = cfg or {}
     today = today or date.today()
-    requested_days = int(profile.get("auction_within_days", 13) or 13)
-    requested_days = max(0, min(requested_days, 365))
+    requested_days = int(profile.get("auction_within_days", 14) or 14)
+    requested_days = max(1, min(requested_days, 365))
     chunk_span_days = int(cfg.get("sale_window_days", 13) or 13)
     # 시작일과 종료일을 모두 포함하므로 13은 14일짜리 구간이다.
     chunk_span_days = max(1, min(chunk_span_days, 13))
 
-    final_day = today + timedelta(days=requested_days)
+    final_day = today + timedelta(days=requested_days - 1)
     windows: list[tuple[date, date]] = []
     start = today
     while start <= final_day:
@@ -915,6 +915,9 @@ class CourtAuctionSeleniumProvider:
         self.province_fanout_max_municipalities = max(
             1, min(30, int(cfg.get("province_fanout_max_municipalities", 8) or 8))
         )
+        self.search_mode = str(cfg.get("search_mode", "fast") or "fast").strip().lower()
+        if self.search_mode not in {"fast", "complete"}:
+            self.search_mode = "fast"
         self.legacy_fallback_only = bool(cfg.get("legacy_code_fallback_only", True))
         self.cache_enabled = bool(cfg.get("cache_enabled", True))
         self.cache_ttl_seconds = max(0, int(cfg.get("cache_ttl_minutes", 15) or 0) * 60)
@@ -1030,6 +1033,7 @@ class CourtAuctionSeleniumProvider:
         """
         selected_regions = [str(x).strip() for x in profile.get("regions", []) or [] if str(x).strip()]
         groups = self._region_query_groups(profile) if selected_regions else [("전국", [None])]
+        quick = self.search_mode == "fast"
         exact_municipality = bool(groups) and all(
             all(bool((codes or {}).get("sigungu")) for codes in variants)
             for _, variants in groups
@@ -1048,13 +1052,13 @@ class CourtAuctionSeleniumProvider:
                 province, municipality = split_region_label(groups[0][0])
                 if province == "제주특별자치도" and not municipality:
                     return [(
-                        "제주지방법원 전체검색 후 주소검증",
+                        "제주지방법원 빠른 조건검색 후 주소검증" if quick else "제주지방법원 전체검색 후 주소검증",
                         [(groups[0][0], [{
                             "sido": "", "sigungu": "", "dong": "",
                             "court_code": "B000530",
                         }])],
-                        True,
-                        True,
+                        not quick,
+                        not quick,
                     )]
 
             # 전국검색의 앞쪽 페이지만 읽고 주소로 거르는 방식은 제주처럼 전국
@@ -1081,15 +1085,30 @@ class CourtAuctionSeleniumProvider:
                 fanout_groups.append((label, variants))
 
             if fanout_possible and fanout_groups:
-                return [("시·도 전체 시·군·구 분할검색", fanout_groups, True, True)]
+                return [(
+                    "시·도 전체 빠른 시·군·구 분할검색" if quick else "시·도 전체 시·군·구 분할검색",
+                    fanout_groups,
+                    not quick,
+                    not quick,
+                )]
 
             # 법원 사이트는 시·도 코드만 지정한 요청에서 브라우저 fetch 자체가
             # ``TypeError: Failed to fetch``(status 0)로 실패하는 경우가 있다.
             # 시·군·구가 많은 시·도는 기존처럼 전국 검색 후 주소를 엄격히 검증한다.
             nationwide_groups = [(label + " (전국 대체검색)", [None]) for label, _ in groups]
-            return [("전국 대체검색 후 시·도 주소검증", nationwide_groups, True, False)]
+            return [(
+                "전국 빠른 대체검색 후 시·도 주소검증" if quick else "전국 대체검색 후 시·도 주소검증",
+                nationwide_groups,
+                not quick,
+                False,
+            )]
         if not exact_municipality:
-            return [("지역·날짜 우선검색", groups, True, False)]
+            return [(
+                "지역·날짜 빠른 조건검색" if quick else "지역·날짜 우선검색",
+                groups,
+                not quick,
+                False,
+            )]
 
         province_groups: list[tuple[str, list[dict[str, str] | None]]] = []
         for label, variants in groups:
@@ -1105,6 +1124,9 @@ class CourtAuctionSeleniumProvider:
                 province_variants.append({"sido": sido, "sigungu": "", "dong": ""})
             if province_variants:
                 province_groups.append((label + " (시·도 대체검색)", province_variants))
+
+        if quick:
+            return [("시·군·구 빠른 조건검색", groups, False, False)]
 
         # 정확한 시·군·구 검색은 용도 대분류까지 비워 누락 가능성을 최소화한다.
         # 시·도 대체검색은 데이터량을 통제하기 위해 토지 대분류를 유지한다.

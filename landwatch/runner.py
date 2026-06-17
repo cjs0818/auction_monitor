@@ -31,6 +31,33 @@ class RunResult:
     excluded_items: list[dict[str, Any]] = field(default_factory=list)
 
 
+def _number(value: Any) -> float:
+    try:
+        if value in (None, "", "-"):
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _run_metrics(diagnostics: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "court_request_count": int(sum(_number(d.get("실제 법원요청")) for d in diagnostics)),
+        "public_sale_request_count": int(sum(_number(d.get("실제 공매요청")) for d in diagnostics)),
+        "cache_hit_count": int(sum(_number(d.get("캐시 재사용")) for d in diagnostics)),
+        "throttle_wait_seconds": round(sum(_number(d.get("요청대기시간(초)")) for d in diagnostics), 1),
+        "server_response_seconds": round(sum(_number(d.get("서버응답시간(초)")) for d in diagnostics), 1),
+        "browser_warmup_seconds": round(sum(_number(d.get("브라우저준비시간(초)")) for d in diagnostics), 1),
+        "detail_photo_seconds": round(sum(_number(d.get("상세·사진 보강시간(초)")) for d in diagnostics), 1),
+        "court_photo_cache_count": int(sum(_number(d.get("경매사진 캐시")) for d in diagnostics)),
+        "court_photo_new_count": int(sum(_number(d.get("경매사진 신규수집")) for d in diagnostics)),
+        "court_photo_failure_count": int(sum(_number(d.get("경매사진 실패")) for d in diagnostics)),
+        "court_price_detail_success_count": int(sum(_number(d.get("경매가격 상세교정")) for d in diagnostics)),
+        "court_price_detail_skipped_count": int(sum(_number(d.get("경매가격 상세생략")) for d in diagnostics)),
+        "court_price_detail_failure_count": int(sum(_number(d.get("경매가격 교정실패")) for d in diagnostics)),
+    }
+
+
 def run_once(
     config_path: str = "config/config.yaml",
     notify: bool = True,
@@ -173,14 +200,27 @@ def run_once(
         notify_items = new_items + changed_items
         channels = send_notifications(notify_items, cfg.get("notifications", {})) if notify else []
         db.finish_run(
-            run_id, status="success", found=len(items), new=len(new_items), changed=len(changed_items)
+            run_id,
+            status="success",
+            found=len(items),
+            new=len(new_items),
+            changed=len(changed_items),
+            metrics=_run_metrics(diagnostics),
         )
         return RunResult(
             items, new_items, changed_items, str(report_csv), str(report_html), channels,
             diagnostics=diagnostics, excluded_items=excluded_items,
         )
     except Exception as exc:
-        db.finish_run(run_id, status="error", found=len(items), new=len(new_items), changed=len(changed_items), message=str(exc))
+        db.finish_run(
+            run_id,
+            status="error",
+            found=len(items),
+            new=len(new_items),
+            changed=len(changed_items),
+            message=str(exc),
+            metrics=_run_metrics(diagnostics),
+        )
         raise
     finally:
         try:

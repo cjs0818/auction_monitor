@@ -25,6 +25,7 @@ source:
     municipality_auto_max_pages: 30
     province_fanout_max_municipalities: 8
     sale_window_days: 13
+    search_mode: fast
     legacy_code_fallback_only: true
     cache_enabled: true
     cache_ttl_minutes: 15
@@ -113,7 +114,7 @@ profiles:
   appraisal_discount_percent:
     min: 20
     max: 90
-  auction_within_days: 90
+  auction_within_days: 14
   include_keywords: []
   exclude_keywords:
   - 지분

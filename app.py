@@ -929,6 +929,21 @@ def recent_runs(cfg: dict[str, Any]) -> None:
             "투자후보": r.get("found_count", 0),
             "신규": r.get("new_count", 0),
             "변경": r.get("changed_count", 0),
+            "법원요청": r.get("court_request_count", 0),
+            "공매요청": r.get("public_sale_request_count", 0),
+            "캐시": r.get("cache_hit_count", 0),
+            "요청대기(초)": r.get("throttle_wait_seconds", 0),
+            "서버응답(초)": r.get("server_response_seconds", 0),
+            "브라우저준비(초)": r.get("browser_warmup_seconds", 0),
+            "상세·사진(초)": r.get("detail_photo_seconds", 0),
+            "사진 신규/실패": (
+                f"{int(r.get('court_photo_new_count', 0) or 0)}/"
+                f"{int(r.get('court_photo_failure_count', 0) or 0)}"
+            ),
+            "가격상세 교정/생략": (
+                f"{int(r.get('court_price_detail_success_count', 0) or 0)}/"
+                f"{int(r.get('court_price_detail_skipped_count', 0) or 0)}"
+            ),
             "메시지": r.get("message", ""),
         }
         for r in runs
@@ -1359,7 +1374,7 @@ with tab_profile:
         key=f"{prefix}_days",
     )
     chunk_days = int((cfg.get("source", {}).get("court_selenium", {}) or {}).get("sale_window_days", 13)) + 1
-    estimated_windows = max(1, (int(auction_within_days) + chunk_days) // chunk_days)
+    estimated_windows = max(1, (int(auction_within_days) + chunk_days - 1) // chunk_days)
     st.caption(
         f"경매는 선택한 {int(auction_within_days)}일 전체를 약 {chunk_days}일 단위 "
         f"{estimated_windows}개 구간으로 나누어 조회하며, 공매는 같은 기간을 온비드 API에 직접 전달합니다."
@@ -1586,6 +1601,20 @@ with tab_system:
     server_region = True
 
     st.markdown("##### 검색속도 최적화")
+    mode_labels = ["빠른 검색", "누락 최소화 검색"]
+    current_search_mode = str(selenium_cfg.get("search_mode", "fast") or "fast")
+    if current_search_mode not in {"fast", "complete"}:
+        current_search_mode = "fast"
+    court_search_mode_label = st.radio(
+        "법원경매 검색 모드",
+        mode_labels,
+        index=0 if current_search_mode == "fast" else 1,
+        horizontal=True,
+        help=(
+            "빠른 검색은 가격·면적·유찰·용도 조건을 법원 서버에 먼저 보내 호출량을 줄입니다. "
+            "누락 최소화 검색은 조건 일부를 로컬 필터로 미루어 더 넓게 조회합니다."
+        ),
+    )
     o1, o2, o3 = st.columns(3)
     adaptive_warmup = o1.checkbox(
         "브라우저 준비시간 자동 단축",
@@ -1629,7 +1658,8 @@ with tab_system:
         help="고속모드에서 목록가격의 추가 확인이 필요한 물건만 이 수량까지 사건상세를 조회합니다.",
     )
     st.caption(
-        "90일 검색은 14일 단위로 7회 조회합니다. 목록에 다음 회차 가격이 있으면 상위 후보별 사건상세 "
+        f"{max(1, int(profiles[0].get('auction_within_days', 14) if profiles else 14))}일 검색은 "
+        "14일 단위로 나누어 조회합니다. 목록에 다음 회차 가격이 있으면 상위 후보별 사건상세 "
         "재조회를 생략하고, 사진은 기존 캐시를 모두 사용하면서 신규 수집만 설정한 상한만큼 누적합니다."
     )
     if st.button("저장된 검색 캐시 비우기", disabled=not cache_enabled):
@@ -1778,6 +1808,7 @@ with tab_system:
             "max_pages": int(max_pages),
             "max_calls_per_run": int(max_calls),
             "sale_window_days": int(sale_window),
+            "search_mode": "fast" if court_search_mode_label == "빠른 검색" else "complete",
             "adaptive_warmup": bool(adaptive_warmup),
             "warmup_settle_seconds": 0.75,
             "legacy_code_fallback_only": bool(legacy_fallback_only),

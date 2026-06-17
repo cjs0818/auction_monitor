@@ -192,6 +192,7 @@ def test_court_selenium_run_falls_back_from_100_to_20_on_http_400():
         "page_size": 100,
         "max_pages": 1,
         "max_calls_per_run": 3,
+        "search_mode": "complete",
     })
     requested_sizes = []
 
@@ -349,6 +350,7 @@ def test_province_only_court_search_uses_nationwide_request_and_local_filter():
         "page_size": 20,
         "max_pages": 1,
         "max_calls_per_run": 2,
+        "search_mode": "complete",
     })
     captured = []
 
@@ -524,7 +526,12 @@ def test_90_day_range_is_split_into_all_court_safe_windows():
     windows = build_sale_date_windows(p, {"sale_window_days": 13}, today=date(2026, 6, 15))
     assert len(windows) == 7
     assert windows[0] == (date(2026, 6, 15), date(2026, 6, 28))
-    assert windows[-1] == (date(2026, 9, 7), date(2026, 9, 13))
+    assert windows[-1] == (date(2026, 9, 7), date(2026, 9, 12))
+
+    p["auction_within_days"] = 14
+    assert build_sale_date_windows(p, {"sale_window_days": 13}, today=date(2026, 6, 15)) == [
+        (date(2026, 6, 15), date(2026, 6, 28))
+    ]
     for previous, current in zip(windows, windows[1:]):
         assert (current[0] - previous[1]).days == 1
 
@@ -558,7 +565,7 @@ def test_buan_90_day_search_checks_every_window_and_both_code_generations(monkey
         )
         requested.append(key)
         # 마지막 날짜 구간의 과거코드에서만 실제 물건이 있다고 가정한다.
-        if key == ("45", "800", "20260907", "20260913"):
+        if key == ("45", "800", "20260907", "20260912"):
             return {"data": {"dma_pageInfo": {"totalCnt": 1}, "dlt_srchResult": [{
                 "printCsNo": "2025 타경 20001", "mokmulSer": "1", "docid": "BUAN-LATE",
                 "hjguSido": "전라북도", "hjguSigu": "부안군", "hjguDong": "변산면",
@@ -572,11 +579,11 @@ def test_buan_90_day_search_checks_every_window_and_both_code_generations(monkey
     items = provider.fetch(p)
     assert len(requested) == 14
     assert requested[0] == ("52", "800", "20260615", "20260628")
-    assert requested[6] == ("52", "800", "20260907", "20260913")
-    assert requested[-1] == ("45", "800", "20260907", "20260913")
+    assert requested[6] == ("52", "800", "20260907", "20260912")
+    assert requested[-1] == ("45", "800", "20260907", "20260912")
     assert requested[7] == ("45", "800", "20260615", "20260628")
-    assert requested[13] == ("45", "800", "20260907", "20260913")
-    assert requested[-1] == ("45", "800", "20260907", "20260913")
+    assert requested[13] == ("45", "800", "20260907", "20260912")
+    assert requested[-1] == ("45", "800", "20260907", "20260912")
     assert provider.call_limit == 14
     assert len(items) == 1
     assert items[0].auction_id == "BUAN-LATE"
@@ -609,7 +616,7 @@ def test_exact_municipality_uses_minimal_server_filters_first():
     p["regions"] = ["충청북도 충주시"]
     provider = CourtAuctionSeleniumProvider({
         "page_size": 20, "max_pages": 1, "max_calls_per_run": 2,
-        "hard_call_cap": 60, "sale_window_days": 13,
+        "hard_call_cap": 60, "sale_window_days": 13, "search_mode": "complete",
     })
     captured = []
 
@@ -646,7 +653,7 @@ def test_exact_municipality_zero_falls_back_to_province_and_local_address_filter
     p["regions"] = ["전북특별자치도 부안군"]
     provider = CourtAuctionSeleniumProvider({
         "page_size": 20, "max_pages": 1, "max_calls_per_run": 4,
-        "hard_call_cap": 60, "sale_window_days": 13,
+        "hard_call_cap": 60, "sale_window_days": 13, "search_mode": "complete",
     })
     captured = []
 
@@ -789,7 +796,7 @@ def test_province_fallback_discards_other_municipalities_before_runner():
     p["auction_within_days"] = 0
     provider = CourtAuctionSeleniumProvider({
         "page_size": 20, "max_pages": 1, "max_calls_per_run": 8,
-        "hard_call_cap": 20, "sale_window_days": 13,
+        "hard_call_cap": 20, "sale_window_days": 13, "search_mode": "complete",
     })
 
     def fake_post(body):
@@ -832,7 +839,7 @@ def test_exact_municipality_match_skips_province_fallback():
     p["auction_within_days"] = 0
     provider = CourtAuctionSeleniumProvider({
         "page_size": 20, "max_pages": 1, "max_calls_per_run": 8,
-        "hard_call_cap": 20, "sale_window_days": 13,
+        "hard_call_cap": 20, "sale_window_days": 13, "search_mode": "complete",
     })
     captured = []
 
@@ -1501,6 +1508,7 @@ def test_jeju_province_only_uses_jeju_court_once_instead_of_region_fanout():
         "max_calls_per_run": 20,
         "hard_call_cap": 60,
         "province_fanout_max_municipalities": 8,
+        "search_mode": "complete",
     })
     captured = []
 
@@ -1589,7 +1597,36 @@ def test_large_province_still_uses_nationwide_fallback_plan():
 
     p = profile()
     p["regions"] = ["경기도"]
-    provider = CourtAuctionSeleniumProvider({"province_fanout_max_municipalities": 8})
+    provider = CourtAuctionSeleniumProvider({
+        "province_fanout_max_municipalities": 8,
+        "search_mode": "complete",
+    })
     plan = provider._query_plan(p)
     assert plan[0][0] == "전국 대체검색 후 시·도 주소검증"
     assert plan[0][1][0][1] == [None]
+
+
+def test_fast_search_mode_sends_server_filters_without_fallback():
+    from landwatch.court_selenium import CourtAuctionSeleniumProvider
+
+    p = profile()
+    p["regions"] = ["충청북도 충주시"]
+    provider = CourtAuctionSeleniumProvider({
+        "page_size": 20, "max_pages": 1, "max_calls_per_run": 2,
+        "hard_call_cap": 60, "sale_window_days": 13, "search_mode": "fast",
+    })
+    captured = []
+
+    def fake_post(body):
+        search = body["dma_srchGdsDtlSrchInfo"]
+        captured.append(dict(search))
+        return {"data": {"dma_pageInfo": {"totalCnt": 0}, "dlt_srchResult": []}}
+
+    provider._post_json = fake_post
+    assert provider.fetch(p) == []
+    assert len(captured) == 1
+    assert captured[0]["rprsAdongSggCd"] == "130"
+    assert captured[0]["lclDspslGdsLstUsgCd"] == "10000"
+    assert captured[0]["flbdNcntMin"] == "1"
+    assert captured[0]["lwsDspslPrcMin"] == "5000000"
+    assert provider.last_fetch_diagnostics[0]["검색방식"] == "시·군·구 빠른 조건검색"
