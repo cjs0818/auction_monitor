@@ -898,6 +898,12 @@ class CourtAuctionSeleniumProvider:
         self.warmup_settle = float(cfg.get("warmup_settle_seconds", 0.75))
         self.min_delay = float(cfg.get("min_delay_seconds", 3.0))
         self.jitter = float(cfg.get("jitter_seconds", 1.5))
+        self.adaptive_throttle = bool(cfg.get("adaptive_throttle", True))
+        self.min_delay_floor = max(0.2, float(cfg.get("min_delay_floor_seconds", 1.0) or 0.2))
+        self.min_delay_floor = min(self.min_delay_floor, self.min_delay)
+        self.delay_recover_step = max(0.0, float(cfg.get("delay_recover_step_seconds", 0.25) or 0.0))
+        self.delay_backoff_step = max(0.0, float(cfg.get("delay_backoff_step_seconds", 0.8) or 0.0))
+        self.delay_backoff_max = max(0.0, float(cfg.get("delay_backoff_max_seconds", 3.0) or 0.0))
         self.max_calls = int(cfg.get("max_calls_per_run", 10))
         self.call_limit = self.max_calls
         self.hard_call_cap = int(cfg.get("hard_call_cap", 60) or 60)
@@ -947,6 +953,7 @@ class CourtAuctionSeleniumProvider:
         self.warmup_elapsed_seconds = 0.0
         self.last_call_at = 0.0
         self.warmed_up = False
+        self.current_search_delay = self.min_delay
         self.last_fetch_diagnostics: list[dict[str, Any]] = []
         self.last_fetch_summary: dict[str, Any] = {}
         self.photo_network_attempts = 0
@@ -1015,11 +1022,30 @@ class CourtAuctionSeleniumProvider:
             "요청대기시간(초)": round(self.throttle_wait_seconds - start_wait_seconds, 1),
             "서버응답시간(초)": round(self.request_elapsed_seconds - start_request_seconds, 1),
             "브라우저준비시간(초)": round(self.warmup_elapsed_seconds - start_warmup_seconds, 1),
+            "검색기본대기(초)": round(self.current_search_delay, 2),
             "날짜구간수": len(date_windows),
             "경매사진 캐시": self.photo_cache_hits,
             "경매사진 신규수집": self.photo_new_count,
             "경매사진 실패": self.photo_failure_count,
         }
+
+    def _record_request_success(self, request_kind: str) -> None:
+        if not self.adaptive_throttle or request_kind != "search":
+            return
+        if self.delay_recover_step <= 0:
+            return
+        self.current_search_delay = max(
+            self.min_delay_floor,
+            self.current_search_delay - self.delay_recover_step,
+        )
+
+    def _record_request_failure(self, request_kind: str) -> None:
+        if not self.adaptive_throttle or request_kind != "search":
+            return
+        if self.delay_backoff_step <= 0:
+            return
+        ceiling = max(self.min_delay, self.min_delay_floor) + self.delay_backoff_max
+        self.current_search_delay = min(ceiling, self.current_search_delay + self.delay_backoff_step)
 
     def _query_plan(self, profile: dict[str, Any]) -> list[tuple[str, list[tuple[str, list[dict[str, str] | None]]], bool, bool]]:
         """검색 안정성을 높이기 위한 단계별 검색계획을 만든다.
@@ -1488,11 +1514,6 @@ class CourtAuctionSeleniumProvider:
         if item.sale_type == "공매":
             return item
 
-        # 사진 수집 여부와 무관하게 다음 예정기일/최저가는 사건상세로 교정한다.
-        item = self._enrich_current_schedule(item)
-        if not self.photo_enabled:
-            return item
-
         from .court_photo import (
             capture_court_photo,
             discard_unusable_photo_cache,
@@ -1504,21 +1525,32 @@ class CourtAuctionSeleniumProvider:
 
         raw = item.raw if isinstance(item.raw, dict) else {}
         item.raw = raw
+        if not self.photo_enabled:
+            # 사진 기능이 꺼진 경우에만 가격 교정을 시도한다.
+            return self._enrich_current_schedule(item)
+
         cached_path = photo_cache_path(item, self.photo_cache_dir)
         if is_usable_photo_cache(cached_path, self.photo_cache_days):
             raw["court_image_cache_path"] = str(cached_path.resolve())
             raw["court_photo_source"] = photo_cache_source(cached_path) or "cache"
+            raw.setdefault("court_price_source", "목록검색 응답(사진 캐시 우선)")
             self.photo_cache_hits += 1
             return item
         if cached_path.exists() or cached_path.with_suffix(cached_path.suffix + ".source").exists():
             discard_unusable_photo_cache(cached_path)
         if is_recent_missing_photo_cache(cached_path, self.photo_missing_cache_days):
             raw["court_photo_source"] = "photo-not-found-cached"
+            raw.setdefault("court_price_source", "목록검색 응답(사진 미존재 캐시)")
             return item
 
         if self.photo_network_attempts >= self.photo_max_per_run:
             raw["court_photo_source"] = "run-limit"
+            raw.setdefault("court_price_source", "목록검색 응답(사진수집 상한)")
             return item
+
+        # 새 사진을 수집할 때만 브라우저 세션을 준비하므로, 사진 캐시/상한 경로는
+        # 드라이버 기동 없이 매우 빠르게 종료된다.
+        item = self._enrich_current_schedule(item)
 
         self.photo_network_attempts += 1
         try:
@@ -1799,7 +1831,7 @@ class CourtAuctionSeleniumProvider:
                 base_delay = self.detail_min_delay
                 jitter = self.detail_jitter
             else:
-                base_delay = self.min_delay
+                base_delay = self.current_search_delay if self.adaptive_throttle else self.min_delay
                 jitter = self.jitter
             wait = base_delay + random.random() * max(0.0, jitter)
             elapsed = time.monotonic() - self.last_call_at
@@ -1879,6 +1911,7 @@ class CourtAuctionSeleniumProvider:
                 script, endpoint_path, body, submission_id
             )
         except Exception as exc:
+            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_script_error")
             raise CourtAuctionSeleniumError(f"브라우저 내부 요청 실패: {exc}") from exc
         finally:
@@ -1886,9 +1919,11 @@ class CourtAuctionSeleniumProvider:
 
         self._save_exchange(body, response, debug_name=debug_name)
         if not isinstance(response, dict):
+            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_empty_response")
             raise CourtAuctionSeleniumError("법원경매 사이트에서 응답을 받지 못했습니다.")
         if not response.get("ok"):
+            self._record_request_failure(request_kind)
             response_text = str(response.get("text", "") or "")
             self._save_debug(f"{debug_name}_http_error", response_text)
             status = to_int(response.get("status"), 0)
@@ -1900,21 +1935,25 @@ class CourtAuctionSeleniumProvider:
         try:
             payload = json.loads(response.get("text", ""))
         except json.JSONDecodeError as exc:
+            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_json_error", response.get("text", ""))
             raise CourtAuctionSeleniumError("법원경매 응답 JSON 해석에 실패했습니다.") from exc
 
         self._save_exchange(body, response, debug_name=debug_name, payload=payload)
         errors = payload.get("errors") if isinstance(payload, dict) else None
         if isinstance(errors, dict) and errors.get("errorMessage"):
+            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_upstream_error", response.get("text", ""))
             raise CourtAuctionSeleniumError(str(errors.get("errorMessage")))
         data = payload.get("data") if isinstance(payload, dict) else None
         if isinstance(data, dict) and data.get("ipcheck") is False:
+            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_blocked", response.get("text", ""))
             raise CourtAuctionBlockedError(
                 "법원경매정보 사이트가 현재 IP의 자동조회 요청을 차단했습니다. "
                 "자동 재시도하지 말고 최소 1시간 뒤 호출량을 줄여 다시 실행하세요."
             )
+        self._record_request_success(request_kind)
         return payload
 
     def lookup_case(self, case_number: str, profile: dict[str, Any] | None = None) -> dict[str, Any]:
