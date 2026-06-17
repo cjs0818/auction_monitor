@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Auction Monitor</title>
+    <style>
+      :root {
+        --bg-1: #0d1b2a;
+        --bg-2: #1b263b;
+        --card: rgba(255, 255, 255, 0.08);
+        --line: rgba(255, 255, 255, 0.2);
+        --text: #e0e1dd;
+        --sub: #b8c0cc;
+        --accent: #ffd166;
+        --accent-2: #06d6a0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Pretendard", "Noto Sans KR", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 20% 20%, rgba(255, 209, 102, 0.15), transparent 35%),
+          radial-gradient(circle at 80% 80%, rgba(6, 214, 160, 0.15), transparent 30%),
+          linear-gradient(135deg, var(--bg-1), var(--bg-2));
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .panel {
+        width: min(760px, 100%);
+        border: 1px solid var(--line);
+        background: var(--card);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 28px;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(28px, 4vw, 40px);
+        letter-spacing: -0.02em;
+      }
+
+      p {
+        margin: 12px 0;
+        line-height: 1.7;
+        color: var(--sub);
+      }
+
+      .badge {
+        display: inline-block;
+        margin-top: 14px;
+        border: 1px solid rgba(255, 209, 102, 0.4);
+        color: var(--accent);
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 13px;
+      }
+
+      .actions {
+        margin-top: 20px;
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+        padding: 11px 16px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .button.primary {
+        background: linear-gradient(135deg, var(--accent), #ffb703);
+        color: #1f2937;
+        border-color: transparent;
+      }
+
+      .note {
+        margin-top: 16px;
+        font-size: 13px;
+      }
+
+      code {
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 2px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="panel">
+      <h1>Auction Monitor</h1>
+      <div class="badge">Cloudflare Pages 연결 완료</div>
+      <p>
+        현재 이 주소는 정적 페이지로 정상 연결되었습니다.
+        이 프로젝트의 본체는 Python Streamlit 앱이므로 Cloudflare Pages 단독으로는 서버를 직접 실행할 수 없습니다.
+      </p>
+      <p>
+        실제 대시보드 주소가 있다면 아래 <code>APP_URL</code> 값을 해당 URL로 바꿔 배포하면
+        자동으로 해당 앱으로 이동합니다.
+      </p>
+      <div class="actions">
+        <a id="open-app" class="button primary" href="#">대시보드 열기</a>
+        <a class="button" href="https://github.com/cjs0818/auction_monitor" target="_blank" rel="noreferrer">GitHub 저장소</a>
+      </div>
+      <p class="note" id="status"></p>
+    </main>
+
+    <script>
+      const APP_URL = "";
+      const status = document.getElementById("status");
+      const openApp = document.getElementById("open-app");
+
+      if (APP_URL) {
+        openApp.href = APP_URL;
+        status.textContent = "연결된 앱 주소: " + APP_URL;
+        window.location.replace(APP_URL);
+      } else {
+        openApp.href = "https://github.com/cjs0818/auction_monitor";
+        openApp.classList.remove("primary");
+        status.textContent = "APP_URL이 비어 있어 자동 연결되지 않습니다. index.html의 APP_URL 값을 설정하세요.";
+      }
+    </script>
+  </body>
+</html>
