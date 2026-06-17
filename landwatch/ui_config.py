@@ -104,7 +104,7 @@ def ensure_config_defaults(cfg: dict[str, Any] | None) -> dict[str, Any]:
         "min_delay_seconds": 3.0,
         "jitter_seconds": 1.5,
         "max_calls_per_run": 10,
-        "hard_call_cap": 60,
+        "hard_call_cap": 65,
         "page_size": 20,
         "max_pages": 8,
         "municipality_auto_max_pages": 30,

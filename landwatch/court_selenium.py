@@ -906,7 +906,7 @@ class CourtAuctionSeleniumProvider:
         self.delay_backoff_max = max(0.0, float(cfg.get("delay_backoff_max_seconds", 3.0) or 0.0))
         self.max_calls = int(cfg.get("max_calls_per_run", 10))
         self.call_limit = self.max_calls
-        self.hard_call_cap = int(cfg.get("hard_call_cap", 60) or 60)
+        self.hard_call_cap = int(cfg.get("hard_call_cap", 65) or 65)
         self.page_size = int(cfg.get("page_size", 20))
         self.max_pages = int(cfg.get("max_pages", 8))
         # 시·군·구 정확검색은 대형 일괄매각의 목적물 행이 페이지를 독점할 수 있다.

@@ -25,7 +25,7 @@ source:
     delay_backoff_step_seconds: 0.8
     delay_backoff_max_seconds: 3.0
     max_calls_per_run: 10
-    hard_call_cap: 60
+    hard_call_cap: 65
     page_size: 20
     max_pages: 8
     municipality_auto_max_pages: 30
