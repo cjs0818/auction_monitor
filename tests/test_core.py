@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 
 from landwatch.filtering import matches_profile
 from landwatch.models import AuctionItem
@@ -630,8 +630,7 @@ def test_exact_municipality_uses_minimal_server_filters_first():
     assert captured[0]["rprsAdongSggCd"] == "130"
     assert captured[0]["flbdNcntMin"] == ""
     assert captured[0]["lwsDspslPrcMin"] == ""
-    assert captured[0]["objctArDtsMin"] == "330"
-    assert captured[0]["objctArDtsMax"] == "3300"
+    assert captured[0]["objctArDtsMin"] == ""
     assert captured[0]["lwsDspslPrcRateMin"] == ""
     assert len(items) == 1
     assert captured[0]["lclDspslGdsLstUsgCd"] == ""
@@ -1594,60 +1593,3 @@ def test_large_province_still_uses_nationwide_fallback_plan():
     plan = provider._query_plan(p)
     assert plan[0][0] == "전국 대체검색 후 시·도 주소검증"
     assert plan[0][1][0][1] == [None]
-
-
-def test_court_search_index_roundtrip(tmp_path):
-    from landwatch.db import Database
-
-    db = Database(str(tmp_path / "landwatch.db"))
-    p = profile()
-    item = AuctionItem(
-        auction_id="IDX-1",
-        sale_type="경매",
-        source_name="대한민국 법원경매정보",
-        case_number="2026타경100",
-        item_number="1",
-        court="청주지방법원",
-        status="유찰",
-        usage="전",
-        address="충청북도 충주시 소태면",
-        province="충청북도",
-        city_county="충주시",
-        min_price=20_000_000,
-        appraisal_price=30_000_000,
-        failed_count=1,
-        land_area_m2=500,
-        auction_date=date(2026, 7, 3),
-        raw={"docid": "IDX-1"},
-    )
-
-    db.save_court_search_index(p, [item])
-    cached = db.get_court_search_index(p, max_age_minutes=30)
-
-    assert cached is not None
-    assert len(cached) == 1
-    assert cached[0].auction_id == "IDX-1"
-    assert cached[0].province == "충청북도"
-    assert cached[0].auction_date == date(2026, 7, 3)
-
-
-def test_court_search_index_expired_returns_none(tmp_path):
-    from datetime import timedelta
-
-    from landwatch.db import Database
-
-    db = Database(str(tmp_path / "landwatch.db"))
-    p = profile()
-    item = AuctionItem(
-        auction_id="IDX-2",
-        province="충청북도",
-        city_county="충주시",
-    )
-    db.save_court_search_index(p, [item])
-
-    old = (datetime.now() - timedelta(minutes=120)).isoformat(timespec="seconds")
-    key = db._profile_index_key(p)
-    db.conn.execute("UPDATE court_search_index SET fetched_at=? WHERE profile_key=?", (old, key))
-    db.conn.commit()
-
-    assert db.get_court_search_index(p, max_age_minutes=30) is None

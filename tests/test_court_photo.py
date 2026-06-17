@@ -30,7 +30,7 @@ def _item() -> AuctionItem:
         court="전주지방법원 정읍지원",
         address="전북특별자치도 부안군 행안면 역리 1117",
         auction_date=date(2026, 7, 1),
-        failed_count=0,                          # 신건 → 가격 상세교정 생략
+        failed_count=0,  # 신건 → 가격 상세교정 생략(드라이버 미시작 보장)
         min_price=20_000_000,
         raw={"boCd": "B000520", "court_list_price_source": "notifyMinmaePrice1"},
     )

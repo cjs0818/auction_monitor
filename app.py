@@ -1612,21 +1612,6 @@ with tab_system:
         disabled=not cache_enabled,
         help="경매정보의 신선도와 반복검색 속도를 함께 고려하면 10~20분을 권장합니다.",
     )
-    i1, i2 = st.columns(2)
-    search_index_enabled = i1.checkbox(
-        "경매 검색 인덱스 재사용",
-        value=bool(selenium_cfg.get("search_index_enabled", True)),
-        help=(
-            "같은 검색조건이면 최근 수집한 법원 목록을 재사용합니다. "
-            "기본은 켜짐이며, 강제 새로조회는 실행 버튼의 새로고침 옵션을 사용하세요."
-        ),
-    )
-    search_index_ttl = i2.number_input(
-        "인덱스 유효시간(분)",
-        min_value=1, max_value=240,
-        value=max(1, int(selenium_cfg.get("search_index_ttl_minutes", 30) or 30)),
-        disabled=not search_index_enabled,
-    )
     f1, f2 = st.columns(2)
     court_fast_mode = f1.checkbox(
         "법원경매 고속 상세조회",
@@ -1799,8 +1784,6 @@ with tab_system:
             "cache_enabled": bool(cache_enabled),
             "cache_ttl_minutes": int(cache_ttl),
             "cache_dir": "data/selenium_cache",
-            "search_index_enabled": bool(search_index_enabled),
-            "search_index_ttl_minutes": int(search_index_ttl),
             "fast_mode": bool(court_fast_mode),
             "price_detail_policy": "smart" if court_fast_mode else "always",
             "price_detail_max_per_run": int(price_detail_max),

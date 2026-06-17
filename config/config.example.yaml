@@ -29,8 +29,6 @@ source:
     cache_enabled: true
     cache_ttl_minutes: 15
     cache_dir: data/selenium_cache
-    search_index_enabled: true
-    search_index_ttl_minutes: 30
     # 목록값이 충분한 물건은 사건상세 가격 재조회를 생략하는 고속모드
     fast_mode: true
     price_detail_policy: smart

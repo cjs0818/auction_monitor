@@ -12,7 +12,7 @@ from .db import Database
 from .filtering import matches_profile
 from .models import AuctionItem
 from .notify import send_notifications
-from .providers import build_provider, normalize_search_target
+from .providers import build_provider
 from .report import save_reports
 from .scoring import score_item
 
@@ -41,30 +41,8 @@ def run_once(
     cfg = load_config(config_path)
     db = Database(str(cfg.get("app", {}).get("database_path", "data/landwatch.db")))
     provider = build_provider(cfg, search_target=search_target)
-    effective_target = normalize_search_target(
-        search_target or (cfg.get("app", {}) or {}).get("search_target", "경매")
-    )
     if force_refresh and hasattr(provider, "cache_enabled"):
         provider.cache_enabled = False
-
-    court_cfg = ((cfg.get("source", {}) or {}).get("court_selenium", {}) or {})
-    search_index_enabled = bool(court_cfg.get("search_index_enabled", False))
-    search_index_ttl_minutes = max(1, int(court_cfg.get("search_index_ttl_minutes", 30) or 30))
-
-    def _has_court_provider(obj: Any) -> bool:
-        if obj.__class__.__name__ == "CourtAuctionSeleniumProvider":
-            return True
-        if obj.__class__.__name__ == "CombinedProvider":
-            return any(p.__class__.__name__ == "CourtAuctionSeleniumProvider" for p in getattr(obj, "providers", []))
-        return False
-
-    can_use_search_index = (
-        search_index_enabled
-        and not force_refresh
-        and effective_target == "경매"
-        and _has_court_provider(provider)
-    )
-
     run_id = db.start_run()
     items: list[AuctionItem] = []
     new_items: list[AuctionItem] = []
@@ -81,19 +59,7 @@ def run_once(
             if selected_names and str(profile.get("name", "")) not in selected_names:
                 continue
             profile_started_at = time.monotonic()
-            fetch_started_at = time.monotonic()
-            index_hit = False
-            candidates: list[AuctionItem]
-            if can_use_search_index:
-                cached = db.get_court_search_index(profile, max_age_minutes=search_index_ttl_minutes)
-                if cached is not None:
-                    candidates = cached
-                    index_hit = True
-                else:
-                    candidates = provider.fetch(profile)
-                    db.save_court_search_index(profile, candidates)
-            else:
-                candidates = provider.fetch(profile)
+            candidates = provider.fetch(profile)
             matched: list[AuctionItem] = []
             reason_counts: Counter[str] = Counter()
             for item in candidates:
@@ -120,37 +86,21 @@ def run_once(
                         })
                     continue
                 matched.append(item)
-            if index_hit:
-                provider_region_diag = []
-                fetch_summary = {
-                    "총 소요시간(초)": round(time.monotonic() - fetch_started_at, 1),
-                    "실제 법원요청": 0,
-                    "실제 공매요청": 0,
-                    "캐시 재사용": len(candidates),
-                    "요청대기시간(초)": 0.0,
-                    "서버응답시간(초)": 0.0,
-                    "브라우저준비시간(초)": 0.0,
-                }
-                region_summary = (
-                    f"검색 인덱스 재사용 · TTL {search_index_ttl_minutes}분 · 후보 {len(candidates):,}건"
-                )
-            else:
-                provider_region_diag = getattr(provider, "last_fetch_diagnostics", []) or []
-                fetch_summary = getattr(provider, "last_fetch_summary", {}) or {}
-                region_summary = "; ".join(
-                    f"{d.get('검색방식', '')} · {d.get('지역', '')} "
-                    f"[{d.get('조회코드', '')}/{d.get('코드구분', '')}] "
-                    f"{d.get('조회기간', '')} 구간 {d.get('완료구간', '')} "
-                    f"전체 {int(d.get('법원 전체건수', 0) or 0):,}건 · "
-                    f"서버행 {int(d.get('수집건수', 0) or 0):,}건 · "
-                    f"지역일치 {int(d.get('지역일치건수', d.get('수집건수', 0)) or 0):,}건 · "
-                    f"지역제외 {int(d.get('지역불일치제외', 0) or 0):,}건 · {d.get('비고', '')}"
-                    for d in provider_region_diag
-                ) or "-"
+            provider_region_diag = getattr(provider, "last_fetch_diagnostics", []) or []
+            fetch_summary = getattr(provider, "last_fetch_summary", {}) or {}
+            region_summary = "; ".join(
+                f"{d.get('검색방식', '')} · {d.get('지역', '')} "
+                f"[{d.get('조회코드', '')}/{d.get('코드구분', '')}] "
+                f"{d.get('조회기간', '')} 구간 {d.get('완료구간', '')} "
+                f"전체 {int(d.get('법원 전체건수', 0) or 0):,}건 · "
+                f"서버행 {int(d.get('수집건수', 0) or 0):,}건 · "
+                f"지역일치 {int(d.get('지역일치건수', d.get('수집건수', 0)) or 0):,}건 · "
+                f"지역제외 {int(d.get('지역불일치제외', 0) or 0):,}건 · {d.get('비고', '')}"
+                for d in provider_region_diag
+            ) or "-"
             diagnostics.append({
                 "검색조건": str(profile.get("name", "")),
                 "검색대상": search_target or (cfg.get("app", {}) or {}).get("search_target", "경매"),
-                "검색 인덱스": "재사용" if index_hit else ("미사용" if not can_use_search_index else "신규생성"),
                 "실행지역": ", ".join(profile.get("regions", []) or ["전국"]),
                 "총 소요시간(초)": fetch_summary.get("총 소요시간(초)", "-"),
                 "목록 수집시간(초)": fetch_summary.get("총 소요시간(초)", "-"),

@@ -898,15 +898,9 @@ class CourtAuctionSeleniumProvider:
         self.warmup_settle = float(cfg.get("warmup_settle_seconds", 0.75))
         self.min_delay = float(cfg.get("min_delay_seconds", 3.0))
         self.jitter = float(cfg.get("jitter_seconds", 1.5))
-        self.adaptive_throttle = bool(cfg.get("adaptive_throttle", True))
-        self.min_delay_floor = max(0.2, float(cfg.get("min_delay_floor_seconds", 1.0) or 0.2))
-        self.min_delay_floor = min(self.min_delay_floor, self.min_delay)
-        self.delay_recover_step = max(0.0, float(cfg.get("delay_recover_step_seconds", 0.25) or 0.0))
-        self.delay_backoff_step = max(0.0, float(cfg.get("delay_backoff_step_seconds", 0.8) or 0.0))
-        self.delay_backoff_max = max(0.0, float(cfg.get("delay_backoff_max_seconds", 3.0) or 0.0))
         self.max_calls = int(cfg.get("max_calls_per_run", 10))
         self.call_limit = self.max_calls
-        self.hard_call_cap = int(cfg.get("hard_call_cap", 65) or 65)
+        self.hard_call_cap = int(cfg.get("hard_call_cap", 60) or 60)
         self.page_size = int(cfg.get("page_size", 20))
         self.max_pages = int(cfg.get("max_pages", 8))
         # 시·군·구 정확검색은 대형 일괄매각의 목적물 행이 페이지를 독점할 수 있다.
@@ -915,12 +909,6 @@ class CourtAuctionSeleniumProvider:
             self.max_pages,
             min(100, int(cfg.get("municipality_auto_max_pages", 30) or 30)),
         )
-        # 시·도 전체검색도 전체건수(totalCnt)가 기본 페이지 상한을 넘으면
-        # 필요한 만큼 자동 확장해 후보 누락을 줄인다.
-        self.province_auto_max_pages = max(
-            self.max_pages,
-            min(100, int(cfg.get("province_auto_max_pages", 30) or 30)),
-        )
         # 시·도 전체검색에서 시·군·구 수가 적은 지역은 전국검색보다
         # 각 시·군·구를 직접 조회하는 편이 정확하다. 제주(2개 시), 세종,
         # 광주·대전·울산 등에 적용하며 대규모 시·도는 기존 대체검색을 유지한다.
@@ -928,8 +916,6 @@ class CourtAuctionSeleniumProvider:
             1, min(30, int(cfg.get("province_fanout_max_municipalities", 8) or 8))
         )
         self.legacy_fallback_only = bool(cfg.get("legacy_code_fallback_only", True))
-        # 가능하면 서버측 필터를 엄격히 적용하고, 결과가 0건이면 완화모드로 자동 재시도한다.
-        self.strict_server_filters = bool(cfg.get("strict_server_filters", False))
         self.cache_enabled = bool(cfg.get("cache_enabled", True))
         self.cache_ttl_seconds = max(0, int(cfg.get("cache_ttl_minutes", 15) or 0) * 60)
         self.cache_dir = Path(str(cfg.get("cache_dir", "data/selenium_cache")))
@@ -961,7 +947,6 @@ class CourtAuctionSeleniumProvider:
         self.warmup_elapsed_seconds = 0.0
         self.last_call_at = 0.0
         self.warmed_up = False
-        self.current_search_delay = self.min_delay
         self.last_fetch_diagnostics: list[dict[str, Any]] = []
         self.last_fetch_summary: dict[str, Any] = {}
         self.photo_network_attempts = 0
@@ -1030,30 +1015,11 @@ class CourtAuctionSeleniumProvider:
             "요청대기시간(초)": round(self.throttle_wait_seconds - start_wait_seconds, 1),
             "서버응답시간(초)": round(self.request_elapsed_seconds - start_request_seconds, 1),
             "브라우저준비시간(초)": round(self.warmup_elapsed_seconds - start_warmup_seconds, 1),
-            "검색기본대기(초)": round(self.current_search_delay, 2),
             "날짜구간수": len(date_windows),
             "경매사진 캐시": self.photo_cache_hits,
             "경매사진 신규수집": self.photo_new_count,
             "경매사진 실패": self.photo_failure_count,
         }
-
-    def _record_request_success(self, request_kind: str) -> None:
-        if not self.adaptive_throttle or request_kind != "search":
-            return
-        if self.delay_recover_step <= 0:
-            return
-        self.current_search_delay = max(
-            self.min_delay_floor,
-            self.current_search_delay - self.delay_recover_step,
-        )
-
-    def _record_request_failure(self, request_kind: str) -> None:
-        if not self.adaptive_throttle or request_kind != "search":
-            return
-        if self.delay_backoff_step <= 0:
-            return
-        ceiling = max(self.min_delay, self.min_delay_floor) + self.delay_backoff_max
-        self.current_search_delay = min(ceiling, self.current_search_delay + self.delay_backoff_step)
 
     def _query_plan(self, profile: dict[str, Any]) -> list[tuple[str, list[tuple[str, list[dict[str, str] | None]]], bool, bool]]:
         """검색 안정성을 높이기 위한 단계별 검색계획을 만든다.
@@ -1115,19 +1081,13 @@ class CourtAuctionSeleniumProvider:
                 fanout_groups.append((label, variants))
 
             if fanout_possible and fanout_groups:
-                return [
-                    ("시·도 코드 직접검색", groups, True, False),
-                    ("시·도 전체 시·군·구 분할검색", fanout_groups, True, True),
-                ]
+                return [("시·도 전체 시·군·구 분할검색", fanout_groups, True, True)]
 
             # 법원 사이트는 시·도 코드만 지정한 요청에서 브라우저 fetch 자체가
             # ``TypeError: Failed to fetch``(status 0)로 실패하는 경우가 있다.
             # 시·군·구가 많은 시·도는 기존처럼 전국 검색 후 주소를 엄격히 검증한다.
             nationwide_groups = [(label + " (전국 대체검색)", [None]) for label, _ in groups]
-            return [
-                ("시·도 코드 직접검색", groups, True, False),
-                ("전국 대체검색 후 시·도 주소검증", nationwide_groups, True, False),
-            ]
+            return [("전국 대체검색 후 시·도 주소검증", nationwide_groups, True, False)]
         if not exact_municipality:
             return [("지역·날짜 우선검색", groups, True, False)]
 
@@ -1220,234 +1180,159 @@ class CourtAuctionSeleniumProvider:
 
                 group_match_count = 0
                 for variant_index, region_codes in enumerate(variants):
-                    province_direct_mode = "시·도 코드 직접검색" in mode_label
                     code_label = self._format_region_codes(region_codes)
-                    strict_filter_mode = self.strict_server_filters and (relaxed_filters or omit_usage_filter)
-                    attempt_specs: list[tuple[str, bool, bool]] = [
-                        ("기본", relaxed_filters, omit_usage_filter)
-                    ]
-                    if strict_filter_mode:
-                        attempt_specs = [
-                            ("엄격", False, False),
-                            ("완화", relaxed_filters, omit_usage_filter),
-                        ]
-
                     variant_total = 0
                     variant_rows = 0
                     variant_region_matches = 0
                     variant_region_mismatches = 0
                     completed_windows = 0
                     limit_reached = False
+                    variant_page_size = (
+                        max(effective_page_size, 100)
+                        if "전국 대체검색" in mode_label else effective_page_size
+                    )
+
                     auto_expanded_page_limit = self.max_pages
                     required_pages_observed = 0
                     truncation_observed = False
-                    applied_relaxed_filters = relaxed_filters
-                    applied_omit_usage_filter = omit_usage_filter
-                    strict_fallback_used = False
 
-                    for attempt_index, (attempt_label, attempt_relaxed_filters, attempt_omit_usage_filter) in enumerate(attempt_specs):
-                        variant_total = 0
-                        variant_rows = 0
-                        variant_region_matches = 0
-                        variant_region_mismatches = 0
-                        completed_windows = 0
-                        limit_reached = False
-                        auto_expanded_page_limit = self.max_pages
-                        required_pages_observed = 0
-                        truncation_observed = False
-                        variant_page_size = (
-                            max(effective_page_size, 100)
-                            if "전국 대체검색" in mode_label else effective_page_size
-                        )
-
-                        for sale_from_date, sale_to_date in date_windows:
-                            page = 1
-                            page_limit = self.max_pages
-                            while page <= page_limit:
-                                if self.calls_so_far >= self.call_limit:
-                                    logger.warning(
-                                        "법원경매 사이트 보호를 위한 실행당 호출 한도(%s회)에 도달해 "
-                                        "추가 조회를 중단합니다.", self.call_limit,
-                                    )
-                                    limit_reached = True
-                                    break
-
-                                request_page_size = variant_page_size
-                                body = build_search_body(
-                                    profile, page, request_page_size, self.cfg,
-                                    region_codes=region_codes,
-                                    sale_from_date=sale_from_date,
-                                    sale_to_date=sale_to_date,
-                                    relaxed_server_filters=attempt_relaxed_filters,
-                                    omit_usage_filter=attempt_omit_usage_filter,
+                    for sale_from_date, sale_to_date in date_windows:
+                        page = 1
+                        page_limit = self.max_pages
+                        while page <= page_limit:
+                            if self.calls_so_far >= self.call_limit:
+                                logger.warning(
+                                    "법원경매 사이트 보호를 위한 실행당 호출 한도(%s회)에 도달해 "
+                                    "추가 조회를 중단합니다.", self.call_limit,
                                 )
-                                try:
-                                    payload = self._post_json(body)
-                                except CourtAuctionHttpError as exc:
-                                    if exc.status == 0:
-                                        logger.warning(
-                                            "법원경매 브라우저 fetch가 끊겨 검색화면 세션을 복구한 뒤 1회 재시도합니다: %s",
-                                            code_label,
-                                        )
-                                        self._recover_search_session()
-                                        try:
-                                            payload = self._post_json(body)
-                                        except CourtAuctionHttpError as retry_exc:
-                                            if (
-                                                retry_exc.status in {0, 400}
-                                                and page == 1
-                                                and request_page_size > 20
-                                            ):
-                                                logger.warning(
-                                                    "세션 복구 후에도 페이지 크기 %s 요청이 실패하여 "
-                                                    "20건으로 자동 전환합니다.", request_page_size,
-                                                )
-                                                effective_page_size = 20
-                                                variant_page_size = 20
-                                                request_page_size = 20
-                                                body = build_search_body(
-                                                    profile, page, request_page_size, self.cfg,
-                                                    region_codes=region_codes,
-                                                    sale_from_date=sale_from_date,
-                                                    sale_to_date=sale_to_date,
-                                                    relaxed_server_filters=attempt_relaxed_filters,
-                                                    omit_usage_filter=attempt_omit_usage_filter,
-                                                )
-                                                self._recover_search_session()
-                                                payload = self._post_json(body)
-                                            elif province_direct_mode:
-                                                logger.warning(
-                                                    "시·도 코드 직접검색이 상태 %s로 실패해 대체검색으로 전환합니다: %s",
-                                                    retry_exc.status, code_label,
-                                                )
-                                                payload = {
-                                                    "data": {
-                                                        "dma_pageInfo": {"totalCnt": 0},
-                                                        "dlt_srchResult": [],
-                                                    }
-                                                }
-                                            else:
-                                                raise
-                                    elif exc.status == 400 and page == 1 and request_page_size > 20:
-                                        logger.warning(
-                                            "법원경매 사이트가 페이지 크기 %s 요청을 상태 %s로 거부하여 "
-                                            "20건으로 자동 전환합니다.", request_page_size, exc.status,
-                                        )
-                                        effective_page_size = 20
-                                        variant_page_size = 20
-                                        request_page_size = 20
-                                        body = build_search_body(
-                                            profile, page, request_page_size, self.cfg,
-                                            region_codes=region_codes,
-                                            sale_from_date=sale_from_date,
-                                            sale_to_date=sale_to_date,
-                                            relaxed_server_filters=attempt_relaxed_filters,
-                                            omit_usage_filter=attempt_omit_usage_filter,
-                                        )
-                                        payload = self._post_json(body)
-                                    elif province_direct_mode:
-                                        logger.warning(
-                                            "시·도 코드 직접검색이 상태 %s로 실패해 대체검색으로 전환합니다: %s",
-                                            exc.status, code_label,
-                                        )
-                                        payload = {
-                                            "data": {
-                                                "dma_pageInfo": {"totalCnt": 0},
-                                                "dlt_srchResult": [],
-                                            }
-                                        }
-                                    else:
-                                        raise
-
-                                data = payload.get("data") if isinstance(payload, dict) else None
-                                data = data if isinstance(data, dict) else {}
-                                rows = data.get("dlt_srchResult")
-                                rows = rows if isinstance(rows, list) else []
-                                page_info = data.get("dma_pageInfo")
-                                page_info = page_info if isinstance(page_info, dict) else {}
-                                total_count = to_int(page_info.get("totalCnt"), len(rows))
-                                if page == 1:
-                                    variant_total += total_count
-                                    has_sigungu = bool((region_codes or {}).get("sigungu"))
-                                    has_sido_only = bool((region_codes or {}).get("sido")) and not has_sigungu
-                                    should_auto_expand = has_sigungu or (
-                                        has_sido_only and "시·도 코드 직접검색" in mode_label
-                                    )
-                                    if should_auto_expand and total_count > request_page_size * page_limit:
-                                        required_pages = (total_count + request_page_size - 1) // request_page_size
-                                        required_pages_observed = max(required_pages_observed, required_pages)
-                                        auto_page_cap = (
-                                            self.municipality_auto_max_pages if has_sigungu
-                                            else self.province_auto_max_pages
-                                        )
-                                        expanded_limit = min(required_pages, auto_page_cap)
-                                        if expanded_limit > page_limit:
-                                            extra_pages = expanded_limit - page_limit
-                                            page_limit = expanded_limit
-                                            auto_expanded_page_limit = max(auto_expanded_page_limit, page_limit)
-                                            self.call_limit = max(
-                                                self.call_limit,
-                                                min(self.hard_call_cap, self.call_limit + extra_pages),
-                                            )
-                                        if required_pages > auto_page_cap:
-                                            truncation_observed = True
-                                variant_rows += len(rows)
-
-                                for raw in rows:
-                                    if not isinstance(raw, dict):
-                                        continue
-                                    item = normalize_search_row(raw)
-                                    if target_region and target_region != "전국" and not item_matches_region(item, target_region):
-                                        variant_region_mismatches += 1
-                                        continue
-                                    variant_region_matches += 1
-                                    group_match_count += 1
-                                    lot_key = _court_lot_key(item)
-                                    if lot_key in found:
-                                        found[lot_key] = _merge_court_lot(found[lot_key], item)
-                                    else:
-                                        found[lot_key] = item
-
-                                logger.info(
-                                    "법원경매 검색: 방식=%s[%s] 프로필=%s 지역=%s 코드=%s 기간=%s~%s "
-                                    "페이지=%s 서버행=%s 지역일치=%s 전체=%s",
-                                    mode_label, attempt_label, profile.get("name", ""), target_region, code_label,
-                                    sale_from_date.isoformat(), sale_to_date.isoformat(), page,
-                                    len(rows), variant_region_matches, total_count,
-                                )
-                                if not rows or len(rows) < request_page_size:
-                                    break
-                                if total_count and page * request_page_size >= total_count:
-                                    break
-                                page += 1
-
-                            if limit_reached:
+                                limit_reached = True
                                 break
-                            completed_windows += 1
+
+                            request_page_size = variant_page_size
+                            body = build_search_body(
+                                profile, page, request_page_size, self.cfg,
+                                region_codes=region_codes,
+                                sale_from_date=sale_from_date,
+                                sale_to_date=sale_to_date,
+                                relaxed_server_filters=relaxed_filters,
+                                omit_usage_filter=omit_usage_filter,
+                            )
+                            try:
+                                payload = self._post_json(body)
+                            except CourtAuctionHttpError as exc:
+                                if exc.status == 0:
+                                    logger.warning(
+                                        "법원경매 브라우저 fetch가 끊겨 검색화면 세션을 복구한 뒤 1회 재시도합니다: %s",
+                                        code_label,
+                                    )
+                                    self._recover_search_session()
+                                    try:
+                                        payload = self._post_json(body)
+                                    except CourtAuctionHttpError as retry_exc:
+                                        if (
+                                            retry_exc.status in {0, 400}
+                                            and page == 1
+                                            and request_page_size > 20
+                                        ):
+                                            logger.warning(
+                                                "세션 복구 후에도 페이지 크기 %s 요청이 실패하여 "
+                                                "20건으로 자동 전환합니다.", request_page_size,
+                                            )
+                                            effective_page_size = 20
+                                            variant_page_size = 20
+                                            request_page_size = 20
+                                            body = build_search_body(
+                                                profile, page, request_page_size, self.cfg,
+                                                region_codes=region_codes,
+                                                sale_from_date=sale_from_date,
+                                                sale_to_date=sale_to_date,
+                                                relaxed_server_filters=relaxed_filters,
+                                                omit_usage_filter=omit_usage_filter,
+                                            )
+                                            self._recover_search_session()
+                                            payload = self._post_json(body)
+                                        else:
+                                            raise
+                                elif exc.status == 400 and page == 1 and request_page_size > 20:
+                                    logger.warning(
+                                        "법원경매 사이트가 페이지 크기 %s 요청을 상태 %s로 거부하여 "
+                                        "20건으로 자동 전환합니다.", request_page_size, exc.status,
+                                    )
+                                    effective_page_size = 20
+                                    variant_page_size = 20
+                                    request_page_size = 20
+                                    body = build_search_body(
+                                        profile, page, request_page_size, self.cfg,
+                                        region_codes=region_codes,
+                                        sale_from_date=sale_from_date,
+                                        sale_to_date=sale_to_date,
+                                        relaxed_server_filters=relaxed_filters,
+                                        omit_usage_filter=omit_usage_filter,
+                                    )
+                                    payload = self._post_json(body)
+                                else:
+                                    raise
+
+                            data = payload.get("data") if isinstance(payload, dict) else None
+                            data = data if isinstance(data, dict) else {}
+                            rows = data.get("dlt_srchResult")
+                            rows = rows if isinstance(rows, list) else []
+                            page_info = data.get("dma_pageInfo")
+                            page_info = page_info if isinstance(page_info, dict) else {}
+                            total_count = to_int(page_info.get("totalCnt"), len(rows))
+                            if page == 1:
+                                variant_total += total_count
+                                # 정확한 시·군·구 조회에서는 일괄매각 한 건이 수백 개 목적물
+                                # 행으로 펼쳐질 수 있다. 설정된 8페이지(160행)에서 자르면 다른
+                                # 실제 물건이 뒤 페이지에 있어도 누락되므로 totalCnt에 맞춰 확장한다.
+                                is_exact_municipality = bool((region_codes or {}).get("sigungu"))
+                                if is_exact_municipality and total_count > request_page_size * page_limit:
+                                    required_pages = (total_count + request_page_size - 1) // request_page_size
+                                    required_pages_observed = max(required_pages_observed, required_pages)
+                                    expanded_limit = min(required_pages, self.municipality_auto_max_pages)
+                                    if expanded_limit > page_limit:
+                                        extra_pages = expanded_limit - page_limit
+                                        page_limit = expanded_limit
+                                        auto_expanded_page_limit = max(auto_expanded_page_limit, page_limit)
+                                        self.call_limit = max(
+                                            self.call_limit,
+                                            min(self.hard_call_cap, self.call_limit + extra_pages),
+                                        )
+                                    if required_pages > self.municipality_auto_max_pages:
+                                        truncation_observed = True
+                            variant_rows += len(rows)
+
+                            for raw in rows:
+                                if not isinstance(raw, dict):
+                                    continue
+                                item = normalize_search_row(raw)
+                                if target_region and target_region != "전국" and not item_matches_region(item, target_region):
+                                    variant_region_mismatches += 1
+                                    continue
+                                variant_region_matches += 1
+                                group_match_count += 1
+                                lot_key = _court_lot_key(item)
+                                if lot_key in found:
+                                    found[lot_key] = _merge_court_lot(found[lot_key], item)
+                                else:
+                                    found[lot_key] = item
+
+                            logger.info(
+                                "법원경매 검색: 방식=%s 프로필=%s 지역=%s 코드=%s 기간=%s~%s "
+                                "페이지=%s 서버행=%s 지역일치=%s 전체=%s",
+                                mode_label, profile.get("name", ""), target_region, code_label,
+                                sale_from_date.isoformat(), sale_to_date.isoformat(), page,
+                                len(rows), variant_region_matches, total_count,
+                            )
+                            if not rows or len(rows) < request_page_size:
+                                break
+                            if total_count and page * request_page_size >= total_count:
+                                break
+                            page += 1
 
                         if limit_reached:
-                            applied_relaxed_filters = attempt_relaxed_filters
-                            applied_omit_usage_filter = attempt_omit_usage_filter
                             break
-
-                        # 엄격 모드 0건이면 기존 완화 필터로 한 번 더 조회한다.
-                        if (
-                            strict_filter_mode
-                            and attempt_index == 0
-                            and variant_rows == 0
-                            and variant_region_matches == 0
-                            and len(attempt_specs) > 1
-                        ):
-                            strict_fallback_used = True
-                            logger.info(
-                                "법원경매 검색: 엄격 서버필터 0건으로 완화 필터 폴백을 실행합니다: %s",
-                                code_label,
-                            )
-                            continue
-
-                        applied_relaxed_filters = attempt_relaxed_filters
-                        applied_omit_usage_filter = attempt_omit_usage_filter
-                        break
+                        completed_windows += 1
 
                     period_label = (
                         f"{date_windows[0][0].isoformat()}~{date_windows[-1][1].isoformat()}"
@@ -1459,22 +1344,12 @@ class CourtAuctionSeleniumProvider:
                         )
                     )
                     if auto_expanded_page_limit > self.max_pages:
-                        if "시·도 코드 직접검색" in mode_label:
-                            note += f" · 시·도 대형목록 대응 {self.max_pages}→{auto_expanded_page_limit}페이지 자동확장"
-                        else:
-                            note += f" · 대형 일괄매각 대응 {self.max_pages}→{auto_expanded_page_limit}페이지 자동확장"
+                        note += f" · 대형 일괄매각 대응 {self.max_pages}→{auto_expanded_page_limit}페이지 자동확장"
                     if truncation_observed:
-                        cap_label = (
-                            self.province_auto_max_pages
-                            if "시·도 코드 직접검색" in mode_label
-                            else self.municipality_auto_max_pages
-                        )
                         note += (
                             f" · 서버 필요 {required_pages_observed}페이지 중 "
-                            f"안전상한 {cap_label}페이지까지만 조회"
+                            f"안전상한 {self.municipality_auto_max_pages}페이지까지만 조회"
                         )
-                    if strict_fallback_used:
-                        note += " · 엄격 서버필터 0건으로 완화필터 폴백"
                     self.last_fetch_diagnostics.append({
                         "검색방식": mode_label,
                         "지역": target_region,
@@ -1487,8 +1362,8 @@ class CourtAuctionSeleniumProvider:
                         "지역일치건수": variant_region_matches,
                         "지역불일치제외": variant_region_mismatches,
                         "비고": note
-                        + (" · 가격/면적/유찰/할인율은 수집 후 적용" if applied_relaxed_filters else "")
-                        + (" · 물건 대분류도 수집 후 판정" if applied_omit_usage_filter else ""),
+                        + (" · 가격/면적/유찰/할인율은 수집 후 적용" if relaxed_filters else "")
+                        + (" · 물건 대분류도 수집 후 판정" if omit_usage_filter else ""),
                     })
 
                     if limit_reached:
@@ -1613,6 +1488,11 @@ class CourtAuctionSeleniumProvider:
         if item.sale_type == "공매":
             return item
 
+        # 사진 수집 여부와 무관하게 다음 예정기일/최저가는 사건상세로 교정한다.
+        item = self._enrich_current_schedule(item)
+        if not self.photo_enabled:
+            return item
+
         from .court_photo import (
             capture_court_photo,
             discard_unusable_photo_cache,
@@ -1624,32 +1504,21 @@ class CourtAuctionSeleniumProvider:
 
         raw = item.raw if isinstance(item.raw, dict) else {}
         item.raw = raw
-        if not self.photo_enabled:
-            # 사진 기능이 꺼진 경우에만 가격 교정을 시도한다.
-            return self._enrich_current_schedule(item)
-
         cached_path = photo_cache_path(item, self.photo_cache_dir)
         if is_usable_photo_cache(cached_path, self.photo_cache_days):
             raw["court_image_cache_path"] = str(cached_path.resolve())
             raw["court_photo_source"] = photo_cache_source(cached_path) or "cache"
-            raw.setdefault("court_price_source", "목록검색 응답(사진 캐시 우선)")
             self.photo_cache_hits += 1
             return item
         if cached_path.exists() or cached_path.with_suffix(cached_path.suffix + ".source").exists():
             discard_unusable_photo_cache(cached_path)
         if is_recent_missing_photo_cache(cached_path, self.photo_missing_cache_days):
             raw["court_photo_source"] = "photo-not-found-cached"
-            raw.setdefault("court_price_source", "목록검색 응답(사진 미존재 캐시)")
             return item
 
         if self.photo_network_attempts >= self.photo_max_per_run:
             raw["court_photo_source"] = "run-limit"
-            raw.setdefault("court_price_source", "목록검색 응답(사진수집 상한)")
             return item
-
-        # 새 사진을 수집할 때만 브라우저 세션을 준비하므로, 사진 캐시/상한 경로는
-        # 드라이버 기동 없이 매우 빠르게 종료된다.
-        item = self._enrich_current_schedule(item)
 
         self.photo_network_attempts += 1
         try:
@@ -1930,7 +1799,7 @@ class CourtAuctionSeleniumProvider:
                 base_delay = self.detail_min_delay
                 jitter = self.detail_jitter
             else:
-                base_delay = self.current_search_delay if self.adaptive_throttle else self.min_delay
+                base_delay = self.min_delay
                 jitter = self.jitter
             wait = base_delay + random.random() * max(0.0, jitter)
             elapsed = time.monotonic() - self.last_call_at
@@ -2010,7 +1879,6 @@ class CourtAuctionSeleniumProvider:
                 script, endpoint_path, body, submission_id
             )
         except Exception as exc:
-            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_script_error")
             raise CourtAuctionSeleniumError(f"브라우저 내부 요청 실패: {exc}") from exc
         finally:
@@ -2018,11 +1886,9 @@ class CourtAuctionSeleniumProvider:
 
         self._save_exchange(body, response, debug_name=debug_name)
         if not isinstance(response, dict):
-            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_empty_response")
             raise CourtAuctionSeleniumError("법원경매 사이트에서 응답을 받지 못했습니다.")
         if not response.get("ok"):
-            self._record_request_failure(request_kind)
             response_text = str(response.get("text", "") or "")
             self._save_debug(f"{debug_name}_http_error", response_text)
             status = to_int(response.get("status"), 0)
@@ -2034,25 +1900,21 @@ class CourtAuctionSeleniumProvider:
         try:
             payload = json.loads(response.get("text", ""))
         except json.JSONDecodeError as exc:
-            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_json_error", response.get("text", ""))
             raise CourtAuctionSeleniumError("법원경매 응답 JSON 해석에 실패했습니다.") from exc
 
         self._save_exchange(body, response, debug_name=debug_name, payload=payload)
         errors = payload.get("errors") if isinstance(payload, dict) else None
         if isinstance(errors, dict) and errors.get("errorMessage"):
-            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_upstream_error", response.get("text", ""))
             raise CourtAuctionSeleniumError(str(errors.get("errorMessage")))
         data = payload.get("data") if isinstance(payload, dict) else None
         if isinstance(data, dict) and data.get("ipcheck") is False:
-            self._record_request_failure(request_kind)
             self._save_debug(f"{debug_name}_blocked", response.get("text", ""))
             raise CourtAuctionBlockedError(
                 "법원경매정보 사이트가 현재 IP의 자동조회 요청을 차단했습니다. "
                 "자동 재시도하지 말고 최소 1시간 뒤 호출량을 줄여 다시 실행하세요."
             )
-        self._record_request_success(request_kind)
         return payload
 
     def lookup_case(self, case_number: str, profile: dict[str, Any] | None = None) -> dict[str, Any]:
