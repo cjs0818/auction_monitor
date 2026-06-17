@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+config/config.yaml
+data/*.db
+reports/*
+!reports/.gitkeep
+logs/
+data/selenium_cache/*
+!data/selenium_cache/.gitkeep
+
+data/court_photo_cache/*
+!data/court_photo_cache/.gitkeep

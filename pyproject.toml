@@ -1,0 +1,8 @@
+[project]
+name = "landwatch"
+version = "0.3.0"
+description = "GUI-based Selenium Korean court land auction candidate monitor"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

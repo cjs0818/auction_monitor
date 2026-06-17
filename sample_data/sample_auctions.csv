@@ -1,0 +1,7 @@
+﻿auction_id,case_number,item_number,court,status,usage,address,province,city_county,min_price,appraisal_price,failed_count,land_area_m2,building_area_m2,auction_date,special_conditions,detail_url,market_estimate,nearby_avg_unit_price
+SAMPLE-AUCTION-001,SAMPLE-CASE-001,TEST-1,샘플법원,유찰,전,(가상주소) 충청북도 충주시 소태면 구룡리 158,충북,충주시,18000000,42000000,2,1180,0,2026-07-03,농지취득자격증명,,36000000,32000
+SAMPLE-AUCTION-002,SAMPLE-CASE-002,TEST-1,샘플법원,신건,임야,(가상주소) 충청북도 제천시 백운면 모정리 산12,충북,제천시,14000000,20000000,0,2500,0,2026-07-15,맹지;분묘기지권 가능성,,19000000,7800
+SAMPLE-AUCTION-003,SAMPLE-CASE-003,TEST-2,샘플법원,유찰,답,(가상주소) 강원특별자치도 원주시 문막읍 건등리 77,강원,원주시,26000000,65000000,3,920,0,2026-06-29,농지취득자격증명,,55000000,61000
+SAMPLE-AUCTION-004,SAMPLE-CASE-004,TEST-1,샘플법원,진행,과수원,(가상주소) 충청남도 공주시 우성면 동대리 201,충남,공주시,29000000,48000000,1,1450,0,2026-08-02,일부 현황도로,,50000000,36000
+SAMPLE-AUCTION-005,SAMPLE-CASE-005,TEST-1,샘플법원,유찰,전,(가상주소) 충청북도 충주시 엄정면 율능리 33,충북,충주시,9000000,30000000,4,660,0,2026-07-24,지분매각;공유자우선매수,,27000000,41000
+SAMPLE-AUCTION-006,SAMPLE-CASE-006,TEST-1,샘플법원,유찰,대지,(가상주소) 충청북도 청주시 상당구 미원면 미원리 10,충북,청주시,45000000,70000000,2,500,0,2026-07-12,,,76000000,150000

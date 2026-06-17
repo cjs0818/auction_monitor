@@ -1,0 +1,156 @@
+app:
+  timezone: Asia/Seoul
+  database_path: data/landwatch.db
+  report_dir: reports
+  only_notify_new_or_changed: true
+  top_n_per_profile: 20
+  search_target: 경매
+source:
+  type: court_selenium
+  label: 대한민국 법원경매정보 Selenium 수집
+  is_sample: false
+  court_selenium:
+    base_url: https://www.courtauction.go.kr
+    headless: true
+    timeout_seconds: 45
+    warmup_wait_seconds: 6
+    adaptive_warmup: true
+    warmup_settle_seconds: 0.75
+    min_delay_seconds: 3.0
+    jitter_seconds: 1.5
+    max_calls_per_run: 10
+    hard_call_cap: 60
+    page_size: 20
+    max_pages: 8
+    municipality_auto_max_pages: 30
+    province_fanout_max_municipalities: 8
+    sale_window_days: 13
+    legacy_code_fallback_only: true
+    cache_enabled: true
+    cache_ttl_minutes: 15
+    cache_dir: data/selenium_cache
+    # 목록값이 충분한 물건은 사건상세 가격 재조회를 생략하는 고속모드
+    fast_mode: true
+    price_detail_policy: smart
+    price_detail_max_per_run: 6
+    detail_min_delay_seconds: 1.5
+    detail_jitter_seconds: 0.5
+    force_land_category: true
+    bid_type_code: '000331'
+    order_by: ''
+    server_side_region_filter: true
+    region_code_map: {}
+    chrome_binary: ''
+    driver_path: ''
+    user_data_dir: ''
+    debug_dir: data/selenium_debug
+    # 정상 실행 중 대용량 요청·응답 및 사진 실패 화면 저장은 끄고, 오류 발생 때만 진단자료를 남깁니다.
+    save_exchange_debug: false
+    photo_debug_enabled: false
+    # 법원 목록 JSON에는 사진이 없어 상위 후보만 공식 사건상세 화면에서 캡처합니다.
+    photo_enabled: true
+    photo_cache_dir: data/court_photo_cache
+    photo_cache_days: 30
+    # 캐시 사진은 전부 즉시 사용하고, 새 사진은 실행할 때마다 최대 6건씩 누적합니다.
+    photo_max_per_run: 6
+    photo_wait_seconds: 0.45
+    photo_capture_timeout_seconds: 2.5
+    photo_missing_cache_days: 7
+    photo_map_fallback: false
+  csv_path: sample_data/sample_auctions.csv
+  onbid_openapi:
+    api_generation: 차세대
+    base_url: https://apis.data.go.kr/B010003
+    service_path: OnbidRlstListSrvc2
+    list_operation: getRlstCltrList2
+    detail_service_path: OnbidRlstDtlSrvc2
+    detail_operation: getRlstDtlInf2
+    detail_enabled: false
+    service_key: ${KAMCO_API_KEY}
+    service_name: 한국자산관리공사_차세대 온비드 부동산 물건목록 조회서비스
+    key_encoding_mode: auto
+    ssl_trust_mode: system
+    ca_bundle_path: ''
+    generated_ca_bundle_path: data/certs/macos-system-ca.pem
+    property_division_codes: 0007,0010,0005,0002,0003,0006,0008,0011,0013
+    private_contract_target: N
+    force_land_category: false
+    timeout_seconds: 30
+    page_size: 100
+    max_pages: 10
+    cache_enabled: true
+    cache_ttl_minutes: 15
+    cache_dir: data/onbid_cache_v2
+profiles:
+- name: 지방 소액 농지·임야
+  enabled: true
+  regions:
+  - 충청북도 충주시
+  - 충청북도 제천시
+  - 강원특별자치도 원주시
+  - 충청남도 공주시
+  statuses:
+  - 신건
+  - 유찰
+  - 진행
+  usages:
+  - 전
+  - 답
+  - 과수원
+  - 임야
+  failed_count:
+    min: 1
+    max: 4
+  min_price:
+    min: 5000000
+    max: 30000000
+  appraisal_price:
+    min: 0
+    max: 0
+  land_area_m2:
+    min: 330
+    max: 3300
+  appraisal_discount_percent:
+    min: 20
+    max: 90
+  auction_within_days: 90
+  include_keywords: []
+  exclude_keywords:
+  - 지분
+  - 법정지상권
+  - 분묘기지권
+  - 맹지
+  - 유치권
+  - 대항력
+  - 선순위
+  scoring_preset: 균형형
+  scoring:
+    discount: 30
+    budget_fit: 12
+    area_fit: 10
+    failed_count: 8
+    usage_preference: 10
+    market_gap: 20
+    data_quality: 10
+  preferred_usages:
+    전: 10
+    답: 10
+    과수원: 8
+    임야: 4
+maps:
+  naver:
+    client_id: ''
+notifications:
+  telegram:
+    enabled: false
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}
+  email:
+    enabled: false
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    from_address: ${SMTP_FROM}
+    to_addresses:
+    - ${SMTP_TO}

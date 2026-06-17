@@ -1,0 +1,34 @@
+LandWatch 토지 경매·공매 통합 모니터 빠른 시작 (macOS)
+
+1) 프로젝트 폴더로 이동
+   cd land_auction_monitor
+
+2) 설치
+   ./scripts/setup_mac.sh
+
+3) 대시보드 실행
+   .venv/bin/python -I -m streamlit run app.py
+
+4) 공매를 사용할 경우
+   - 공공데이터포털에서 ‘캠코공매물건조회서비스’ 인증키 발급
+   - 대시보드 ‘수집·알림 설정 → 온비드 공매 설정’에 키 입력
+   - ‘수집 설정 저장’ 클릭
+
+5) 브라우저 첫 화면에서 검색대상 선택
+   - 경매
+   - 공매
+   - 경매 및 공매
+
+6) ‘검색조건 관리’에서 지역·진행상태·물건용도·가격·면적·유찰횟수 저장
+
+7) ‘검색·대시보드’에서 연결 점검 후 지금 검색 실행
+
+CLI 예시
+   .venv/bin/python -I -m landwatch.cli run --target 경매 --no-notify
+   .venv/bin/python -I -m landwatch.cli run --target 공매 --no-notify
+   .venv/bin/python -I -m landwatch.cli run --target "경매 및 공매" --no-notify
+
+보고서: reports/
+법원 오류자료: data/selenium_debug/
+온비드 캐시: data/onbid_cache/
+설정: GUI에서 저장 (config/config.yaml 직접 편집 불필요)
