@@ -1612,6 +1612,14 @@ with tab_system:
         disabled=not cache_enabled,
         help="경매정보의 신선도와 반복검색 속도를 함께 고려하면 10~20분을 권장합니다.",
     )
+    strict_server_filters = st.checkbox(
+        "서버 필터 우선(0건 시 자동 완화 재시도)",
+        value=bool(selenium_cfg.get("strict_server_filters", False)),
+        help=(
+            "가능하면 가격/면적/유찰/할인율/용도를 법원 서버에 먼저 적용해 요청량을 줄입니다. "
+            "엄격 조건에서 0건이면 기존 완화 검색으로 자동 재시도합니다."
+        ),
+    )
     f1, f2 = st.columns(2)
     court_fast_mode = f1.checkbox(
         "법원경매 고속 상세조회",
@@ -1784,6 +1792,7 @@ with tab_system:
             "cache_enabled": bool(cache_enabled),
             "cache_ttl_minutes": int(cache_ttl),
             "cache_dir": "data/selenium_cache",
+            "strict_server_filters": bool(strict_server_filters),
             "fast_mode": bool(court_fast_mode),
             "price_detail_policy": "smart" if court_fast_mode else "always",
             "price_detail_max_per_run": int(price_detail_max),

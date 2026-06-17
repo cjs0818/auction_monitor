@@ -117,6 +117,7 @@ def ensure_config_defaults(cfg: dict[str, Any] | None) -> dict[str, Any]:
         "cache_enabled": True,
         "cache_ttl_minutes": 15,
         "cache_dir": "data/selenium_cache",
+        "strict_server_filters": False,
         "fast_mode": True,
         "price_detail_policy": "smart",
         "price_detail_max_per_run": 6,

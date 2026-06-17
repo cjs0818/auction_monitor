@@ -639,6 +639,90 @@ def test_exact_municipality_uses_minimal_server_filters_first():
     assert provider.last_fetch_diagnostics[-1]["검색방식"] == "시·도 대체검색 후 주소검증"
 
 
+def test_strict_server_filters_retries_with_relaxed_filters_on_zero_result():
+    from landwatch.court_selenium import CourtAuctionSeleniumProvider
+
+    p = profile()
+    p["regions"] = ["충청북도 충주시"]
+    provider = CourtAuctionSeleniumProvider({
+        "page_size": 20,
+        "max_pages": 1,
+        "max_calls_per_run": 4,
+        "hard_call_cap": 20,
+        "strict_server_filters": True,
+        "cache_enabled": False,
+    })
+    captured = []
+
+    def fake_post(body):
+        search = dict(body["dma_srchGdsDtlSrchInfo"])
+        captured.append(search)
+        # 1차(엄격): 서버필터를 모두 적용한 요청은 0건
+        if search["flbdNcntMin"]:
+            return {"data": {"dma_pageInfo": {"totalCnt": 0}, "dlt_srchResult": []}}
+        # 2차(완화): 완화필터로 재시도 시 대상 물건 1건 반환
+        return {"data": {"dma_pageInfo": {"totalCnt": 1}, "dlt_srchResult": [{
+            "printCsNo": "2025 타경 30100", "mokmulSer": "1", "docid": "STRICT-FALLBACK-1",
+            "hjguSido": "충청북도", "hjguSigu": "충주시",
+            "gamevalAmt": "30,000,000원", "minmaePrice": "20,000,000원",
+            "yuchalCnt": "1", "maeGiil": "20260620", "jimokList": "전",
+            "areaList": "토지 500㎡", "lclsUtilCd": "10000",
+        }]}}
+
+    provider._post_json = fake_post
+    items = provider.fetch(p)
+
+    assert len(captured) == 2
+    assert captured[0]["flbdNcntMin"] == "1"
+    assert captured[0]["lwsDspslPrcMin"] == "5000000"
+    assert captured[0]["objctArDtsMin"] == "330"
+    assert captured[0]["lclDspslGdsLstUsgCd"] == "10000"
+    assert captured[1]["flbdNcntMin"] == ""
+    assert captured[1]["lwsDspslPrcMin"] == ""
+    assert captured[1]["objctArDtsMin"] == ""
+    assert captured[1]["lclDspslGdsLstUsgCd"] == ""
+    assert len(items) == 1
+    assert any("엄격 서버필터 0건으로 완화필터 폴백" in d["비고"] for d in provider.last_fetch_diagnostics)
+
+
+def test_strict_server_filters_skips_relaxed_retry_when_strict_has_rows():
+    from landwatch.court_selenium import CourtAuctionSeleniumProvider
+
+    p = profile()
+    p["regions"] = ["충청북도 충주시"]
+    provider = CourtAuctionSeleniumProvider({
+        "page_size": 20,
+        "max_pages": 1,
+        "max_calls_per_run": 4,
+        "hard_call_cap": 20,
+        "strict_server_filters": True,
+        "cache_enabled": False,
+    })
+    captured = []
+
+    def fake_post(body):
+        search = dict(body["dma_srchGdsDtlSrchInfo"])
+        captured.append(search)
+        return {"data": {"dma_pageInfo": {"totalCnt": 1}, "dlt_srchResult": [{
+            "printCsNo": "2025 타경 30101", "mokmulSer": "1", "docid": "STRICT-ONLY-1",
+            "hjguSido": "충청북도", "hjguSigu": "충주시",
+            "gamevalAmt": "30,000,000원", "minmaePrice": "20,000,000원",
+            "yuchalCnt": "1", "maeGiil": "20260620", "jimokList": "전",
+            "areaList": "토지 500㎡", "lclsUtilCd": "10000",
+        }]}}
+
+    provider._post_json = fake_post
+    items = provider.fetch(p)
+
+    assert len(captured) == 1
+    assert captured[0]["flbdNcntMin"] == "1"
+    assert captured[0]["lwsDspslPrcMin"] == "5000000"
+    assert captured[0]["objctArDtsMin"] == "330"
+    assert captured[0]["lclDspslGdsLstUsgCd"] == "10000"
+    assert len(items) == 1
+    assert not any("엄격 서버필터 0건으로 완화필터 폴백" in d["비고"] for d in provider.last_fetch_diagnostics)
+
+
 def test_exact_municipality_zero_falls_back_to_province_and_local_address_filter():
     from landwatch.court_selenium import CourtAuctionSeleniumProvider
 
