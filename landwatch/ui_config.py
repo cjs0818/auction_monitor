@@ -108,6 +108,7 @@ def ensure_config_defaults(cfg: dict[str, Any] | None) -> dict[str, Any]:
         "page_size": 20,
         "max_pages": 8,
         "municipality_auto_max_pages": 30,
+        "province_auto_max_pages": 30,
         "province_fanout_max_municipalities": 8,
         "sale_window_days": 13,
         "adaptive_warmup": True,

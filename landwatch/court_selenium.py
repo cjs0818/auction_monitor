@@ -915,6 +915,12 @@ class CourtAuctionSeleniumProvider:
             self.max_pages,
             min(100, int(cfg.get("municipality_auto_max_pages", 30) or 30)),
         )
+        # 시·도 전체검색도 전체건수(totalCnt)가 기본 페이지 상한을 넘으면
+        # 필요한 만큼 자동 확장해 후보 누락을 줄인다.
+        self.province_auto_max_pages = max(
+            self.max_pages,
+            min(100, int(cfg.get("province_auto_max_pages", 30) or 30)),
+        )
         # 시·도 전체검색에서 시·군·구 수가 적은 지역은 전국검색보다
         # 각 시·군·구를 직접 조회하는 편이 정확하다. 제주(2개 시), 세종,
         # 광주·대전·울산 등에 적용하며 대규모 시·도는 기존 대체검색을 유지한다.
@@ -1340,11 +1346,19 @@ class CourtAuctionSeleniumProvider:
                                 # 정확한 시·군·구 조회에서는 일괄매각 한 건이 수백 개 목적물
                                 # 행으로 펼쳐질 수 있다. 설정된 8페이지(160행)에서 자르면 다른
                                 # 실제 물건이 뒤 페이지에 있어도 누락되므로 totalCnt에 맞춰 확장한다.
-                                is_exact_municipality = bool((region_codes or {}).get("sigungu"))
-                                if is_exact_municipality and total_count > request_page_size * page_limit:
+                                has_sigungu = bool((region_codes or {}).get("sigungu"))
+                                has_sido_only = bool((region_codes or {}).get("sido")) and not has_sigungu
+                                should_auto_expand = has_sigungu or (
+                                    has_sido_only and "시·도 코드 직접검색" in mode_label
+                                )
+                                if should_auto_expand and total_count > request_page_size * page_limit:
                                     required_pages = (total_count + request_page_size - 1) // request_page_size
                                     required_pages_observed = max(required_pages_observed, required_pages)
-                                    expanded_limit = min(required_pages, self.municipality_auto_max_pages)
+                                    auto_page_cap = (
+                                        self.municipality_auto_max_pages if has_sigungu
+                                        else self.province_auto_max_pages
+                                    )
+                                    expanded_limit = min(required_pages, auto_page_cap)
                                     if expanded_limit > page_limit:
                                         extra_pages = expanded_limit - page_limit
                                         page_limit = expanded_limit
@@ -1353,7 +1367,7 @@ class CourtAuctionSeleniumProvider:
                                             self.call_limit,
                                             min(self.hard_call_cap, self.call_limit + extra_pages),
                                         )
-                                    if required_pages > self.municipality_auto_max_pages:
+                                    if required_pages > auto_page_cap:
                                         truncation_observed = True
                             variant_rows += len(rows)
 
@@ -1399,11 +1413,19 @@ class CourtAuctionSeleniumProvider:
                         )
                     )
                     if auto_expanded_page_limit > self.max_pages:
-                        note += f" · 대형 일괄매각 대응 {self.max_pages}→{auto_expanded_page_limit}페이지 자동확장"
+                        if "시·도 코드 직접검색" in mode_label:
+                            note += f" · 시·도 대형목록 대응 {self.max_pages}→{auto_expanded_page_limit}페이지 자동확장"
+                        else:
+                            note += f" · 대형 일괄매각 대응 {self.max_pages}→{auto_expanded_page_limit}페이지 자동확장"
                     if truncation_observed:
+                        cap_label = (
+                            self.province_auto_max_pages
+                            if "시·도 코드 직접검색" in mode_label
+                            else self.municipality_auto_max_pages
+                        )
                         note += (
                             f" · 서버 필요 {required_pages_observed}페이지 중 "
-                            f"안전상한 {self.municipality_auto_max_pages}페이지까지만 조회"
+                            f"안전상한 {cap_label}페이지까지만 조회"
                         )
                     self.last_fetch_diagnostics.append({
                         "검색방식": mode_label,

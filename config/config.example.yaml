@@ -29,6 +29,7 @@ source:
     page_size: 20
     max_pages: 8
     municipality_auto_max_pages: 30
+    province_auto_max_pages: 30
     province_fanout_max_municipalities: 8
     sale_window_days: 13
     legacy_code_fallback_only: true

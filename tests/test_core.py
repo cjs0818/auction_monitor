@@ -1353,6 +1353,69 @@ def test_exact_municipality_auto_expands_beyond_160_component_rows():
     assert any("8→9페이지 자동확장" in d["비고"] for d in provider.last_fetch_diagnostics)
 
 
+def test_province_direct_search_auto_expands_pages_to_cover_total_count():
+    from landwatch.court_selenium import CourtAuctionSeleniumProvider
+
+    p = profile()
+    p["regions"] = ["경기도"]
+    p["auction_within_days"] = 0
+    provider = CourtAuctionSeleniumProvider({
+        "page_size": 20,
+        "max_pages": 8,
+        "province_auto_max_pages": 30,
+        "max_calls_per_run": 10,
+        "hard_call_cap": 65,
+        "cache_enabled": False,
+    })
+
+    rows = []
+    for idx in range(1, 191):
+        rows.append({
+            "printCsNo": f"2026 타경 {5000 + idx}",
+            "maemulSer": "1",
+            "mokmulSer": "1",
+            "boCd": "B000210",
+            "jiwonNm": "의정부지방법원",
+            "hjguSido": "경기도",
+            "hjguSigu": "가평군",
+            "hjguDong": "가평읍",
+            "daepyoLotno": f"대곡리 {idx}",
+            "gamevalAmt": "50,000,000",
+            "minmaePrice": "30,000,000",
+            "maeGiil": date.today().strftime("%Y%m%d"),
+            "jimokList": "답",
+            "areaList": "500㎡",
+            "docid": f"GG-{idx}",
+        })
+
+    requested_pages = []
+
+    def fake_post(body):
+        search = body["dma_srchGdsDtlSrchInfo"]
+        # 시·도 코드 직접검색 요청만 사용되는지 확인
+        assert search["rprsAdongSdCd"] == "41"
+        assert search["rprsAdongSggCd"] == ""
+
+        page_no = body["dma_pageInfo"]["pageNo"]
+        page_size = body["dma_pageInfo"]["pageSize"]
+        requested_pages.append(page_no)
+        start = (page_no - 1) * page_size
+        chunk = rows[start:start + page_size]
+        return {
+            "data": {
+                "dma_pageInfo": {"totalCnt": len(rows)},
+                "dlt_srchResult": chunk,
+            }
+        }
+
+    provider._post_json = fake_post
+    items = provider.fetch(p)
+
+    assert requested_pages == list(range(1, 11))
+    assert len(items) == 190
+    assert any("시·도 대형목록 대응 8→10페이지 자동확장" in d["비고"] for d in provider.last_fetch_diagnostics)
+
+
 def test_all_builtin_municipalities_keep_unique_full_codes_and_three_digit_request_codes():
     from landwatch.regions import (
         EXPECTED_MUNICIPALITY_COUNT,
