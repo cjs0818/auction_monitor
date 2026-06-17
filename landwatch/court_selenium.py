@@ -1107,13 +1107,19 @@ class CourtAuctionSeleniumProvider:
                 fanout_groups.append((label, variants))
 
             if fanout_possible and fanout_groups:
-                return [("시·도 전체 시·군·구 분할검색", fanout_groups, True, True)]
+                return [
+                    ("시·도 코드 직접검색", groups, True, False),
+                    ("시·도 전체 시·군·구 분할검색", fanout_groups, True, True),
+                ]
 
             # 법원 사이트는 시·도 코드만 지정한 요청에서 브라우저 fetch 자체가
             # ``TypeError: Failed to fetch``(status 0)로 실패하는 경우가 있다.
             # 시·군·구가 많은 시·도는 기존처럼 전국 검색 후 주소를 엄격히 검증한다.
             nationwide_groups = [(label + " (전국 대체검색)", [None]) for label, _ in groups]
-            return [("전국 대체검색 후 시·도 주소검증", nationwide_groups, True, False)]
+            return [
+                ("시·도 코드 직접검색", groups, True, False),
+                ("전국 대체검색 후 시·도 주소검증", nationwide_groups, True, False),
+            ]
         if not exact_municipality:
             return [("지역·날짜 우선검색", groups, True, False)]
 
@@ -1206,6 +1212,7 @@ class CourtAuctionSeleniumProvider:
 
                 group_match_count = 0
                 for variant_index, region_codes in enumerate(variants):
+                    province_direct_mode = "시·도 코드 직접검색" in mode_label
                     code_label = self._format_region_codes(region_codes)
                     variant_total = 0
                     variant_rows = 0
@@ -1277,6 +1284,17 @@ class CourtAuctionSeleniumProvider:
                                             )
                                             self._recover_search_session()
                                             payload = self._post_json(body)
+                                        elif province_direct_mode:
+                                            logger.warning(
+                                                "시·도 코드 직접검색이 상태 %s로 실패해 대체검색으로 전환합니다: %s",
+                                                retry_exc.status, code_label,
+                                            )
+                                            payload = {
+                                                "data": {
+                                                    "dma_pageInfo": {"totalCnt": 0},
+                                                    "dlt_srchResult": [],
+                                                }
+                                            }
                                         else:
                                             raise
                                 elif exc.status == 400 and page == 1 and request_page_size > 20:
@@ -1296,6 +1314,17 @@ class CourtAuctionSeleniumProvider:
                                         omit_usage_filter=omit_usage_filter,
                                     )
                                     payload = self._post_json(body)
+                                elif province_direct_mode:
+                                    logger.warning(
+                                        "시·도 코드 직접검색이 상태 %s로 실패해 대체검색으로 전환합니다: %s",
+                                        exc.status, code_label,
+                                    )
+                                    payload = {
+                                        "data": {
+                                            "dma_pageInfo": {"totalCnt": 0},
+                                            "dlt_srchResult": [],
+                                        }
+                                    }
                                 else:
                                     raise
 
