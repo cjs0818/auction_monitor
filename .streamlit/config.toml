@@ -1,6 +1,5 @@
 [browser]
 gatherUsageStats = false
-serverAddress = "localhost"
 
 [client]
 showErrorDetails = false
@@ -10,6 +9,5 @@ toolbarMode = "viewer"
 level = "info"
 
 [server]
-port = 8501
-headless = false
-runOnSave = true
+headless = true
+runOnSave = false

@@ -175,3 +175,43 @@ PYTHONPATH=. python -m pytest -q
 ## 법원 경매 대표사진
 
 법원 목록 JSON에 사진 URL이 없는 점을 보완하기 위해, 최종 표시할 상위 경매물건만 공식 사건상세 화면에서 대표사진을 캡처하여 `data/court_photo_cache/`에 저장합니다. 자세한 내용은 `README_법원경매사진수정.md`를 참고하십시오.
+
+## 10. Streamlit Community Cloud 배포
+
+이 저장소는 Streamlit 앱(`app.py`)을 그대로 Cloud에 올릴 수 있도록 준비되어 있습니다.
+
+- Python 런타임 고정: `runtime.txt`
+- Selenium 실행용 시스템 패키지: `packages.txt`
+- Streamlit 실행 설정: `.streamlit/config.toml`
+- Secrets 입력 예시: `.streamlit/secrets.toml.example`
+
+### 10-1. 저장소 측 준비 상태 (완료)
+
+아래 항목이 main 브랜치에 반영되어 있으면 Streamlit Cloud에서 바로 인식합니다.
+
+1. `app.py`가 저장소 루트에 존재
+2. `requirements.txt` 존재
+3. `runtime.txt` 존재
+4. `packages.txt` 존재
+5. `.streamlit/config.toml` 존재
+
+### 10-2. Streamlit Cloud에서 사용자가 마지막으로 할 단계
+
+1. https://share.streamlit.io 에 로그인
+2. New app 클릭
+3. Repository: `cjs0818/auction_monitor`
+4. Branch: `main`
+5. Main file path: `app.py`
+6. Advanced settings → Secrets에 `.streamlit/secrets.toml.example` 형식으로 필요한 값 입력
+7. Deploy 클릭
+
+배포가 성공하면 `https://<앱이름>.streamlit.app` 주소가 발급됩니다.
+
+### 10-3. Cloudflare Pages와 최종 연결
+
+Streamlit URL이 발급되면 아래 2개 파일의 `APP_URL` 값을 그 주소로 변경 후 push 하십시오.
+
+- `index.html`
+- `public/index.html`
+
+그러면 `https://auction-monitor.pages.dev` 접속 시 Streamlit 앱으로 자동 연결됩니다.
