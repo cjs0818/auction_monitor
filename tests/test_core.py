@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from landwatch.filtering import matches_profile
 from landwatch.models import AuctionItem
@@ -339,7 +339,7 @@ def test_selected_region_is_always_sent_to_court_server_even_when_legacy_flag_is
     assert search["cortStDvs"] == "2"
 
 
-def test_province_only_court_search_prefers_province_code_then_local_filter():
+def test_province_only_court_search_uses_nationwide_request_and_local_filter():
     from landwatch.court_selenium import CourtAuctionSeleniumProvider
 
     p = profile()
@@ -379,11 +379,11 @@ def test_province_only_court_search_prefers_province_code_then_local_filter():
     provider._post_json = fake_post
     items = provider.fetch(p)
     search = captured[0]["dma_srchGdsDtlSrchInfo"]
-    assert search["rprsAdongSdCd"] == "41"
+    assert search["rprsAdongSdCd"] == ""
     assert search["rprsAdongSggCd"] == ""
-    assert search["cortStDvs"] == "2"
+    assert search["cortStDvs"] == "1"
     assert [item.province for item in items] == ["경기도"]
-    assert provider.last_fetch_diagnostics[0]["검색방식"] == "시·도 코드 직접검색"
+    assert provider.last_fetch_diagnostics[0]["검색방식"] == "전국 대체검색 후 시·도 주소검증"
 
 
 def test_connection_check_uses_selected_region_instead_of_nationwide():
@@ -630,97 +630,14 @@ def test_exact_municipality_uses_minimal_server_filters_first():
     assert captured[0]["rprsAdongSggCd"] == "130"
     assert captured[0]["flbdNcntMin"] == ""
     assert captured[0]["lwsDspslPrcMin"] == ""
-    assert captured[0]["objctArDtsMin"] == ""
+    assert captured[0]["objctArDtsMin"] == "330"
+    assert captured[0]["objctArDtsMax"] == "3300"
     assert captured[0]["lwsDspslPrcRateMin"] == ""
     assert len(items) == 1
     assert captured[0]["lclDspslGdsLstUsgCd"] == ""
     assert any(d["코드구분"] == "대체검색 생략" for d in provider.last_fetch_diagnostics)
     assert provider.last_fetch_diagnostics[0]["검색방식"] == "시·군·구 완전 최소조건검색"
     assert provider.last_fetch_diagnostics[-1]["검색방식"] == "시·도 대체검색 후 주소검증"
-
-
-def test_strict_server_filters_retries_with_relaxed_filters_on_zero_result():
-    from landwatch.court_selenium import CourtAuctionSeleniumProvider
-
-    p = profile()
-    p["regions"] = ["충청북도 충주시"]
-    provider = CourtAuctionSeleniumProvider({
-        "page_size": 20,
-        "max_pages": 1,
-        "max_calls_per_run": 4,
-        "hard_call_cap": 20,
-        "strict_server_filters": True,
-        "cache_enabled": False,
-    })
-    captured = []
-
-    def fake_post(body):
-        search = dict(body["dma_srchGdsDtlSrchInfo"])
-        captured.append(search)
-        # 1차(엄격): 서버필터를 모두 적용한 요청은 0건
-        if search["flbdNcntMin"]:
-            return {"data": {"dma_pageInfo": {"totalCnt": 0}, "dlt_srchResult": []}}
-        # 2차(완화): 완화필터로 재시도 시 대상 물건 1건 반환
-        return {"data": {"dma_pageInfo": {"totalCnt": 1}, "dlt_srchResult": [{
-            "printCsNo": "2025 타경 30100", "mokmulSer": "1", "docid": "STRICT-FALLBACK-1",
-            "hjguSido": "충청북도", "hjguSigu": "충주시",
-            "gamevalAmt": "30,000,000원", "minmaePrice": "20,000,000원",
-            "yuchalCnt": "1", "maeGiil": "20260620", "jimokList": "전",
-            "areaList": "토지 500㎡", "lclsUtilCd": "10000",
-        }]}}
-
-    provider._post_json = fake_post
-    items = provider.fetch(p)
-
-    assert len(captured) == 2
-    assert captured[0]["flbdNcntMin"] == "1"
-    assert captured[0]["lwsDspslPrcMin"] == "5000000"
-    assert captured[0]["objctArDtsMin"] == "330"
-    assert captured[0]["lclDspslGdsLstUsgCd"] == "10000"
-    assert captured[1]["flbdNcntMin"] == ""
-    assert captured[1]["lwsDspslPrcMin"] == ""
-    assert captured[1]["objctArDtsMin"] == ""
-    assert captured[1]["lclDspslGdsLstUsgCd"] == ""
-    assert len(items) == 1
-    assert any("엄격 서버필터 0건으로 완화필터 폴백" in d["비고"] for d in provider.last_fetch_diagnostics)
-
-
-def test_strict_server_filters_skips_relaxed_retry_when_strict_has_rows():
-    from landwatch.court_selenium import CourtAuctionSeleniumProvider
-
-    p = profile()
-    p["regions"] = ["충청북도 충주시"]
-    provider = CourtAuctionSeleniumProvider({
-        "page_size": 20,
-        "max_pages": 1,
-        "max_calls_per_run": 4,
-        "hard_call_cap": 20,
-        "strict_server_filters": True,
-        "cache_enabled": False,
-    })
-    captured = []
-
-    def fake_post(body):
-        search = dict(body["dma_srchGdsDtlSrchInfo"])
-        captured.append(search)
-        return {"data": {"dma_pageInfo": {"totalCnt": 1}, "dlt_srchResult": [{
-            "printCsNo": "2025 타경 30101", "mokmulSer": "1", "docid": "STRICT-ONLY-1",
-            "hjguSido": "충청북도", "hjguSigu": "충주시",
-            "gamevalAmt": "30,000,000원", "minmaePrice": "20,000,000원",
-            "yuchalCnt": "1", "maeGiil": "20260620", "jimokList": "전",
-            "areaList": "토지 500㎡", "lclsUtilCd": "10000",
-        }]}}
-
-    provider._post_json = fake_post
-    items = provider.fetch(p)
-
-    assert len(captured) == 1
-    assert captured[0]["flbdNcntMin"] == "1"
-    assert captured[0]["lwsDspslPrcMin"] == "5000000"
-    assert captured[0]["objctArDtsMin"] == "330"
-    assert captured[0]["lclDspslGdsLstUsgCd"] == "10000"
-    assert len(items) == 1
-    assert not any("엄격 서버필터 0건으로 완화필터 폴백" in d["비고"] for d in provider.last_fetch_diagnostics)
 
 
 def test_exact_municipality_zero_falls_back_to_province_and_local_address_filter():
@@ -1437,69 +1354,6 @@ def test_exact_municipality_auto_expands_beyond_160_component_rows():
     assert any("8→9페이지 자동확장" in d["비고"] for d in provider.last_fetch_diagnostics)
 
 
-def test_province_direct_search_auto_expands_pages_to_cover_total_count():
-    from landwatch.court_selenium import CourtAuctionSeleniumProvider
-
-    p = profile()
-    p["regions"] = ["경기도"]
-    p["auction_within_days"] = 0
-    provider = CourtAuctionSeleniumProvider({
-        "page_size": 20,
-        "max_pages": 8,
-        "province_auto_max_pages": 30,
-        "max_calls_per_run": 10,
-        "hard_call_cap": 65,
-        "cache_enabled": False,
-    })
-
-    rows = []
-    for idx in range(1, 191):
-        rows.append({
-            "printCsNo": f"2026 타경 {5000 + idx}",
-            "maemulSer": "1",
-            "mokmulSer": "1",
-            "boCd": "B000210",
-            "jiwonNm": "의정부지방법원",
-            "hjguSido": "경기도",
-            "hjguSigu": "가평군",
-            "hjguDong": "가평읍",
-            "daepyoLotno": f"대곡리 {idx}",
-            "gamevalAmt": "50,000,000",
-            "minmaePrice": "30,000,000",
-            "maeGiil": date.today().strftime("%Y%m%d"),
-            "jimokList": "답",
-            "areaList": "500㎡",
-            "docid": f"GG-{idx}",
-        })
-
-    requested_pages = []
-
-    def fake_post(body):
-        search = body["dma_srchGdsDtlSrchInfo"]
-        # 시·도 코드 직접검색 요청만 사용되는지 확인
-        assert search["rprsAdongSdCd"] == "41"
-        assert search["rprsAdongSggCd"] == ""
-
-        page_no = body["dma_pageInfo"]["pageNo"]
-        page_size = body["dma_pageInfo"]["pageSize"]
-        requested_pages.append(page_no)
-        start = (page_no - 1) * page_size
-        chunk = rows[start:start + page_size]
-        return {
-            "data": {
-                "dma_pageInfo": {"totalCnt": len(rows)},
-                "dlt_srchResult": chunk,
-            }
-        }
-
-    provider._post_json = fake_post
-    items = provider.fetch(p)
-
-    assert requested_pages == list(range(1, 11))
-    assert len(items) == 190
-    assert any("시·도 대형목록 대응 8→10페이지 자동확장" in d["비고"] for d in provider.last_fetch_diagnostics)
-
-
 def test_all_builtin_municipalities_keep_unique_full_codes_and_three_digit_request_codes():
     from landwatch.regions import (
         EXPECTED_MUNICIPALITY_COUNT,
@@ -1731,61 +1585,69 @@ def test_jeju_status_zero_recovers_session_and_retries_once():
     assert search["rprsAdongSggCd"] == ""
 
 
-def test_large_province_tries_direct_search_then_nationwide_fallback():
+def test_large_province_still_uses_nationwide_fallback_plan():
     from landwatch.court_selenium import CourtAuctionSeleniumProvider
 
     p = profile()
     p["regions"] = ["경기도"]
     provider = CourtAuctionSeleniumProvider({"province_fanout_max_municipalities": 8})
     plan = provider._query_plan(p)
-    assert plan[0][0] == "시·도 코드 직접검색"
-    assert plan[1][0] == "전국 대체검색 후 시·도 주소검증"
-    assert plan[1][1][0][1] == [None]
+    assert plan[0][0] == "전국 대체검색 후 시·도 주소검증"
+    assert plan[0][1][0][1] == [None]
 
 
-def test_province_direct_search_failure_falls_back_to_nationwide_search():
-    from landwatch.court_selenium import (
-        CourtAuctionHttpError,
-        CourtAuctionSeleniumProvider,
+def test_court_search_index_roundtrip(tmp_path):
+    from landwatch.db import Database
+
+    db = Database(str(tmp_path / "landwatch.db"))
+    p = profile()
+    item = AuctionItem(
+        auction_id="IDX-1",
+        sale_type="경매",
+        source_name="대한민국 법원경매정보",
+        case_number="2026타경100",
+        item_number="1",
+        court="청주지방법원",
+        status="유찰",
+        usage="전",
+        address="충청북도 충주시 소태면",
+        province="충청북도",
+        city_county="충주시",
+        min_price=20_000_000,
+        appraisal_price=30_000_000,
+        failed_count=1,
+        land_area_m2=500,
+        auction_date=date(2026, 7, 3),
+        raw={"docid": "IDX-1"},
     )
 
+    db.save_court_search_index(p, [item])
+    cached = db.get_court_search_index(p, max_age_minutes=30)
+
+    assert cached is not None
+    assert len(cached) == 1
+    assert cached[0].auction_id == "IDX-1"
+    assert cached[0].province == "충청북도"
+    assert cached[0].auction_date == date(2026, 7, 3)
+
+
+def test_court_search_index_expired_returns_none(tmp_path):
+    from datetime import timedelta
+
+    from landwatch.db import Database
+
+    db = Database(str(tmp_path / "landwatch.db"))
     p = profile()
-    p["regions"] = ["경기도"]
-    p["auction_within_days"] = 0
-    provider = CourtAuctionSeleniumProvider({
-        "page_size": 20,
-        "max_pages": 1,
-        "max_calls_per_run": 10,
-        "hard_call_cap": 20,
-        "province_fanout_max_municipalities": 8,
-    })
-    captured = []
+    item = AuctionItem(
+        auction_id="IDX-2",
+        province="충청북도",
+        city_county="충주시",
+    )
+    db.save_court_search_index(p, [item])
 
-    def fake_post(body):
-        search = body["dma_srchGdsDtlSrchInfo"]
-        captured.append((search["rprsAdongSdCd"], search["rprsAdongSggCd"], search["cortStDvs"]))
-        if search["rprsAdongSdCd"] == "41" and not search["rprsAdongSggCd"]:
-            raise CourtAuctionHttpError(0, "HTTP 0")
-        return {
-            "data": {
-                "dma_pageInfo": {"pageNo": 1, "pageSize": 100, "totalCnt": 1},
-                "dlt_srchResult": [
-                    {
-                        "printCsNo": "2026 타경 3", "mokmulSer": "1", "docid": "GG-3",
-                        "hjguSido": "경기도", "hjguSigu": "가평군",
-                        "gamevalAmt": "30,000,000원", "minmaePrice": "20,000,000원",
-                        "yuchalCnt": "1", "maeGiil": date.today().strftime("%Y%m%d"),
-                        "jimokList": "전", "areaList": "토지 500㎡",
-                    },
-                ],
-            }
-        }
+    old = (datetime.now() - timedelta(minutes=120)).isoformat(timespec="seconds")
+    key = db._profile_index_key(p)
+    db.conn.execute("UPDATE court_search_index SET fetched_at=? WHERE profile_key=?", (old, key))
+    db.conn.commit()
 
-    provider._post_json = fake_post
-    provider._recover_search_session = lambda: None
-
-    items = provider.fetch(p)
-    assert items
-    assert any(sdcd == "41" for sdcd, _, _ in captured)
-    assert any(sdcd == "" and cort_st == "1" for sdcd, _, cort_st in captured)
-    assert any(d["검색방식"] == "전국 대체검색 후 시·도 주소검증" for d in provider.last_fetch_diagnostics)
+    assert db.get_court_search_index(p, max_age_minutes=30) is None

@@ -16,27 +16,21 @@ source:
     warmup_wait_seconds: 6
     adaptive_warmup: true
     warmup_settle_seconds: 0.75
-    min_delay_seconds: 1.8
-    jitter_seconds: 0.9
-    # 요청 성공이 이어지면 1.0초까지 점진 가속하고, 오류 시 자동으로 감속합니다.
-    adaptive_throttle: true
-    min_delay_floor_seconds: 1.0
-    delay_recover_step_seconds: 0.25
-    delay_backoff_step_seconds: 0.8
-    delay_backoff_max_seconds: 3.0
+    min_delay_seconds: 3.0
+    jitter_seconds: 1.5
     max_calls_per_run: 10
-    hard_call_cap: 65
+    hard_call_cap: 60
     page_size: 20
     max_pages: 8
     municipality_auto_max_pages: 30
-    province_auto_max_pages: 30
     province_fanout_max_municipalities: 8
     sale_window_days: 13
     legacy_code_fallback_only: true
     cache_enabled: true
     cache_ttl_minutes: 15
     cache_dir: data/selenium_cache
-    strict_server_filters: false
+    search_index_enabled: true
+    search_index_ttl_minutes: 30
     # 목록값이 충분한 물건은 사건상세 가격 재조회를 생략하는 고속모드
     fast_mode: true
     price_detail_policy: smart

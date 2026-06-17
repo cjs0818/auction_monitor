@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import date, datetime
@@ -7,7 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .models import AuctionItem
-from .utils import stable_json
+from .utils import stable_json, to_date, to_float, to_int
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -41,6 +42,13 @@ CREATE TABLE IF NOT EXISTS runs (
   changed_count INTEGER DEFAULT 0,
   message TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS court_search_index (
+    profile_key TEXT PRIMARY KEY,
+    profile_json TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    item_count INTEGER NOT NULL,
+    payload_json TEXT NOT NULL
+);
 """
 
 
@@ -53,6 +61,120 @@ class Database:
         self.conn.executescript(SCHEMA)
         self.conn.commit()
         self._remove_legacy_onbid_round_duplicates()
+
+    @staticmethod
+    def _profile_index_payload(profile: dict) -> dict:
+        # 검색결과를 바꾸는 핵심 조건만 인덱스 키에 반영한다.
+        keys = (
+            "regions",
+            "statuses",
+            "usages",
+            "failed_count",
+            "min_price",
+            "appraisal_price",
+            "land_area_m2",
+            "appraisal_discount_percent",
+            "auction_within_days",
+            "include_keywords",
+            "exclude_keywords",
+        )
+        payload = {k: profile.get(k) for k in keys}
+        payload["name"] = str(profile.get("name", ""))
+        return payload
+
+    @classmethod
+    def _profile_index_key(cls, profile: dict) -> str:
+        payload = cls._profile_index_payload(profile)
+        digest = hashlib.sha256(stable_json(payload).encode("utf-8")).hexdigest()
+        return digest
+
+    @staticmethod
+    def _auction_item_from_dict(data: dict) -> AuctionItem:
+        return AuctionItem(
+            auction_id=str(data.get("auction_id", "")),
+            sale_type=str(data.get("sale_type", "경매") or "경매"),
+            source_name=str(data.get("source_name", "") or ""),
+            case_number=str(data.get("case_number", "") or ""),
+            item_number=str(data.get("item_number", "") or ""),
+            court=str(data.get("court", "") or ""),
+            status=str(data.get("status", "") or ""),
+            usage=str(data.get("usage", "") or ""),
+            address=str(data.get("address", "") or ""),
+            province=str(data.get("province", "") or ""),
+            city_county=str(data.get("city_county", "") or ""),
+            min_price=to_int(data.get("min_price"), 0),
+            appraisal_price=to_int(data.get("appraisal_price"), 0),
+            failed_count=to_int(data.get("failed_count"), 0),
+            land_area_m2=to_float(data.get("land_area_m2"), 0.0),
+            building_area_m2=to_float(data.get("building_area_m2"), 0.0),
+            auction_date=to_date(data.get("auction_date")),
+            special_conditions=list(data.get("special_conditions") or []),
+            detail_url=str(data.get("detail_url", "") or ""),
+            market_estimate=to_int(data.get("market_estimate"), 0),
+            nearby_avg_unit_price=to_float(data.get("nearby_avg_unit_price"), 0.0),
+            raw=dict(data.get("raw") or {}),
+            score=to_float(data.get("score"), 0.0),
+            grade=str(data.get("grade", "미평가") or "미평가"),
+            score_reasons=list(data.get("score_reasons") or []),
+            risk_reasons=list(data.get("risk_reasons") or []),
+            matched_profile=str(data.get("matched_profile", "") or ""),
+        )
+
+    def get_court_search_index(
+        self,
+        profile: dict,
+        *,
+        max_age_minutes: int,
+    ) -> list[AuctionItem] | None:
+        max_age_minutes = max(1, int(max_age_minutes or 1))
+        key = self._profile_index_key(profile)
+        row = self.conn.execute(
+            "SELECT fetched_at, payload_json FROM court_search_index WHERE profile_key=?",
+            (key,),
+        ).fetchone()
+        if not row:
+            return None
+
+        fetched_at = str(row["fetched_at"] or "")
+        try:
+            fetched_dt = datetime.fromisoformat(fetched_at)
+        except ValueError:
+            return None
+
+        age_seconds = (datetime.now() - fetched_dt).total_seconds()
+        if age_seconds > max_age_minutes * 60:
+            return None
+
+        try:
+            payload = json.loads(row["payload_json"] or "[]")
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, list):
+            return None
+        return [self._auction_item_from_dict(x) for x in payload if isinstance(x, dict)]
+
+    def save_court_search_index(
+        self,
+        profile: dict,
+        items: list[AuctionItem],
+    ) -> None:
+        key = self._profile_index_key(profile)
+        profile_json = stable_json(self._profile_index_payload(profile))
+        now = datetime.now().isoformat(timespec="seconds")
+        payload_json = json.dumps([item.to_dict() for item in items], ensure_ascii=False, default=str)
+        self.conn.execute(
+            """
+            INSERT INTO court_search_index(profile_key, profile_json, fetched_at, item_count, payload_json)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(profile_key) DO UPDATE SET
+              profile_json=excluded.profile_json,
+              fetched_at=excluded.fetched_at,
+              item_count=excluded.item_count,
+              payload_json=excluded.payload_json
+            """,
+            (key, profile_json, now, len(items), payload_json),
+        )
+        self.conn.commit()
 
     @staticmethod
     def _stored_onbid_rank(payload: dict, today: date | None = None) -> tuple:
