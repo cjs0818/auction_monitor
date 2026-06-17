@@ -11,4 +11,8 @@ if [[ ! -x .venv/bin/python ]]; then
   read -r -p "Enter 키를 누르면 종료합니다."
   exit 1
 fi
-exec .venv/bin/python -I -m streamlit run app.py
+
+# 브라우저 자동 열기 (약 2초 대기 후)
+sleep 2 && open "http://localhost:8501" &
+
+exec .venv/bin/python -I -m streamlit run app.py --logger.level=warning

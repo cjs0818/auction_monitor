@@ -51,13 +51,20 @@ Conda·ROS2 환경과 충돌했던 Mac에서는 다음을 사용합니다.
 ./scripts/repair_mac_environment.sh
 ```
 
-대시보드 실행:
+### 대시보드 실행 (웹브라우저에서 자동 오픈)
 
+#### 방법 1: Finder에서 실행 (가장 간단)
+`대시보드실행.command`를 더블클릭하면 웹브라우저가 자동으로 열립니다.
+
+#### 방법 2: Python 스크립트 실행
+```bash
+python start_dashboard.py
+```
+
+#### 방법 3: 터미널에서 실행 (기존 방식)
 ```bash
 .venv/bin/python -I -m streamlit run app.py
 ```
-
-또는 Finder에서 `대시보드실행.command`를 더블클릭합니다.
 
 ## 2. GUI에서 공매 인증키 등록
 
